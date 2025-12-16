@@ -620,8 +620,9 @@ def render_jbrowse_style(
                         # Label length above insertion position (purple)
                         dr.text((x0_draw + 2, y - 12), label, fill=ins_color, font=font)
             elif t == "del" or t == "ref_skip":
-                # Deletion shown as dark gray rectangle (same width as normal read)
-                del_color = (80, 80, 80)  # Dark gray
+                # Deletion shown as dark gray rectangle with 80% opacity (blended with white background)
+                # Original (80, 80, 80) at 80% opacity on white = (115, 115, 115)
+                del_color = (115, 115, 115)
                 dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=del_color)
                 # Label deletion length
                 if show_insertion_labels and rect_idx in rect_to_seg:
@@ -665,9 +666,10 @@ def render_jbrowse_style(
                 else:
                     dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=color)
             else:
-                # Positions without variants (match) shown in gray
+                # Positions without variants (match) shown in gray with 80% opacity
                 if t == "match":
-                    color = (180, 180, 180)  # Gray
+                    # Original (180, 180, 180) at 80% opacity on white = (195, 195, 195)
+                    color = (195, 195, 195)
                 dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=color)
         
         # Draw read direction arrow (only at read end)

@@ -480,13 +480,14 @@ def render_svg_snapshot(
                         })
                         text.text = f"I({seg.length})"
             elif t == "del" or t == "ref_skip":
-                # Deletion shown as dark gray rectangle (same width as normal read)
+                # Deletion shown as dark gray rectangle with 80% opacity
                 del_color = (80, 80, 80)  # Dark gray
                 rect = SubElement(svg, "rect", {
                     "x": str(x0_draw), "y": str(y),
                     "width": str(x1_draw - x0_draw),
                     "height": str(read_height),
-                    "fill": rgb_to_hex(del_color)
+                    "fill": rgb_to_hex(del_color),
+                    "fill-opacity": "0.8"
                 })
                 # Label deletion length, color based on width
                 if show_insertion_labels and rect_idx in rect_to_seg:
@@ -545,12 +546,21 @@ def render_svg_snapshot(
             else:
                 if t == "match":
                     color = (180, 180, 180)
-                rect = SubElement(svg, "rect", {
-                    "x": str(x0_draw), "y": str(y),
-                    "width": str(x1_draw - x0_draw),
-                    "height": str(read_height),
-                    "fill": rgb_to_hex(color)
-                })
+                    # Match regions with 80% opacity
+                    rect = SubElement(svg, "rect", {
+                        "x": str(x0_draw), "y": str(y),
+                        "width": str(x1_draw - x0_draw),
+                        "height": str(read_height),
+                        "fill": rgb_to_hex(color),
+                        "fill-opacity": "0.8"
+                    })
+                else:
+                    rect = SubElement(svg, "rect", {
+                        "x": str(x0_draw), "y": str(y),
+                        "width": str(x1_draw - x0_draw),
+                        "height": str(read_height),
+                        "fill": rgb_to_hex(color)
+                    })
         
         # Draw direction arrow (only at read end)
         if style == "jbrowse":

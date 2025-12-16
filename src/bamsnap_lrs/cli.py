@@ -44,7 +44,6 @@ def main():
     
     if args.cmd == "snap":
         from .reader import fetch_reads
-        from .renderer import render_snapshot
         from .ref import get_ref_subseq
         chrom, coords = args.pos.split(":")
         if "-" in coords:
@@ -73,6 +72,7 @@ def main():
         ref_seq = None
         if args.use_fa and args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
+        
         # Determine format based on output file extension
         output_format = None
         if args.out.lower().endswith('.svg'):

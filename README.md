@@ -184,6 +184,26 @@ python -m bamsnap_lrs snap \
 | Visual quality | High | High (JBrowse-style) |
 | Batch processing | Complex | Simple CLI |
 
+### Visual Comparison
+
+Below is a side-by-side comparison showing the same genomic region visualized by JBrowse and Bamsnap-LRS:
+
+**JBrowse (Web Browser Screenshot)**
+
+![JBrowse Screenshot](example/ScreenShot_jbrowse.png)
+
+**Bamsnap-LRS (Static SVG Output)**
+
+![Bamsnap-LRS Output](example/test_output.svg)
+
+Both images show the same genomic region with similar visual elements:
+- Coverage track with base composition
+- Read pileup with direction indicators
+- Coordinate axis with position markers
+- Color-coded variants (mismatches, insertions, deletions)
+
+The key difference is that Bamsnap-LRS generates this output as a static file without requiring a web server, making it ideal for publications and batch processing.
+
 ## 📁 Project Structure
 
 ```

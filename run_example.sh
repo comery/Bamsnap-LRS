@@ -23,16 +23,16 @@ echo "1. 生成 SVG 格式..."
 python3 -m bamsnap_lrs snap \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
-    --out test_output.svg \
+    --out example/chrM_1000_3000.bamsnapLRS.svg \
     --use-fa \
     --fa "$FASTA" \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - SVG" \
-    --width 1200
+    --width 1500
 
 if [ $? -eq 0 ]; then
-    echo "✓ SVG output success: test_output.svg"
+    echo "✓ SVG output success: example/chrM_1000_3000.bamsnapLRS.svg"
 else
     echo "✗ SVG output failed"
 fi
@@ -42,16 +42,16 @@ echo "2. 生成 PDF 格式..."
 python3 -m bamsnap_lrs snap \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
-    --out test_output.pdf \
+    --out example/chrM_1000_3000.bamsnapLRS.pdf \
     --use-fa \
     --fa "$FASTA" \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - PDF" \
-    --width 1200
+    --width 1500
 
 if [ $? -eq 0 ]; then
-    echo "✓ PDF output success: test_output.pdf"
+    echo "✓ PDF output success: example/chrM_1000_3000.bamsnapLRS.pdf"
 else
     echo "✗ PDF output failed"
 fi
