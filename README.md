@@ -194,7 +194,7 @@ Below is a side-by-side comparison showing the same genomic region visualized by
 
 **Bamsnap-LRS (Static SVG Output)**
 
-![Bamsnap-LRS Output](example/test_output.svg)
+![Bamsnap-LRS Output](example/chrM_1000_3000.bamsnapLRS.svg)
 
 Both images show the same genomic region with similar visual elements:
 - Coverage track with base composition
