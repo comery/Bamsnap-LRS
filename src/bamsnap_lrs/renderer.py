@@ -316,125 +316,99 @@ def draw_coverage_track(
     dr.line([(axis_x - 3, bar_bottom), (axis_x, bar_bottom)], fill=(100, 100, 100), width=1)
     dr.text((2, bar_bottom - 8), "0", fill=(80, 80, 80), font=font)
     
-    # Draw by pixel position, each pixel maps to corresponding base position
+    # Draw by pixel position, each pixel aggregates all base positions it covers
+    import math
     for px in range(width):
-        # Calculate base position index for this pixel
-        base_idx = int(px * num_bases / width)
-        if base_idx >= num_bases:
-            base_idx = num_bases - 1
+        # Calculate the range of base positions this pixel covers
+        base_start_idx = int(px * num_bases / width)
+        base_end_idx = int((px + 1) * num_bases / width)
+        if base_end_idx <= base_start_idx:
+            base_end_idx = base_start_idx + 1
+        if base_end_idx > num_bases:
+            base_end_idx = num_bases
         
-        dist = base_distribution[base_idx]
-        depth = dist["depth"]
-        if depth == 0:
+        # Aggregate all base positions in this range
+        agg_ref_match = 0
+        agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
+        agg_depth = 0
+        
+        for base_idx in range(base_start_idx, base_end_idx):
+            dist = base_distribution[base_idx]
+            agg_ref_match += dist.get("ref_match", 0)
+            for base in ["A", "C", "G", "T", "N"]:
+                agg_variants[base] += dist.get(base, 0)
+            agg_depth += dist.get("depth", 0)
+        
+        # Average over the number of positions (but use ceil for variants to preserve rare variants)
+        num_positions = base_end_idx - base_start_idx
+        if num_positions > 1:
+            agg_ref_match = round(agg_ref_match / num_positions)
+            for base in agg_variants:
+                if agg_variants[base] > 0:
+                    # Use ceil to ensure variants are not lost
+                    agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
+            agg_depth = round(agg_depth / num_positions)
+        
+        if agg_depth == 0:
             continue
         
         # Actual drawing position (add margin)
         draw_x = margin + px
         
         # Calculate total bar height for this position (proportional to depth)
-        bar_height = int(height * min(depth / max_cov, 1.0))
+        bar_height = int(height * min(agg_depth / max_cov, 1.0))
         if bar_height <= 0:
             continue
         
-        # Check if using data with reference information
-        has_ref_match = "ref_match" in dist
+        # Calculate height for each part
+        base_heights = {}
+        total_count = agg_ref_match
+        for base in ["A", "C", "G", "T", "N"]:
+            total_count += agg_variants[base]
         
-        if has_ref_match:
-            # Use pre-calculated reference match and variant data
-            ref_match = dist.get("ref_match", 0)
-            
-            # Calculate height for each part
-            base_heights = {}
-            total_count = ref_match
-            for base in ["A", "C", "G", "T", "N"]:
-                total_count += dist.get(base, 0)
-            
-            if total_count == 0:
+        if total_count == 0:
+            continue
+        
+        # Reference match portion
+        if agg_ref_match > 0:
+            base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
+        
+        # Variant portion - ensure at least 1 pixel height if variant exists
+        for base in ["A", "C", "G", "T", "N"]:
+            count = agg_variants[base]
+            if count > 0:
+                h = int(bar_height * count / total_count)
+                # Ensure at least 1 pixel for visible variants
+                base_heights[base] = max(1, h) if h == 0 else h
+        
+        # Adjust heights to ensure full fill
+        total_height_used = sum(base_heights.values())
+        if total_height_used < bar_height and base_heights:
+            max_base = max(base_heights.items(), key=lambda x: x[1])[0]
+            base_heights[max_base] += (bar_height - total_height_used)
+        elif total_height_used > bar_height:
+            # If total exceeds bar_height (due to ensuring min 1px), reduce ref portion
+            excess = total_height_used - bar_height
+            if "ref" in base_heights and base_heights["ref"] > excess:
+                base_heights["ref"] -= excess
+        
+        # Draw from bottom to top
+        bar_bottom = y + height
+        current_y = bar_bottom
+        
+        # First draw variant portion (in fixed order A→C→G→T→N, with corresponding colors)
+        for base in ["A", "C", "G", "T", "N"]:
+            if base not in base_heights or base_heights[base] <= 0:
                 continue
-            
-            # Reference match portion
-            if ref_match > 0:
-                base_heights["ref"] = int(bar_height * ref_match / total_count)
-            
-            # Variant portion
-            for base in ["A", "C", "G", "T", "N"]:
-                count = dist.get(base, 0)
-                if count > 0:
-                    base_heights[base] = int(bar_height * count / total_count)
-            
-            # Adjust heights to ensure full fill
-            total_height_used = sum(base_heights.values())
-            if total_height_used < bar_height and base_heights:
-                max_base = max(base_heights.items(), key=lambda x: x[1])[0]
-                base_heights[max_base] += (bar_height - total_height_used)
-            
-            # Draw from bottom to top
-            bar_bottom = y + height
-            current_y = bar_bottom
-            
-            # First draw variant portion (in fixed order A→C→G→T→N, with corresponding colors)
-            for base in ["A", "C", "G", "T", "N"]:
-                if base not in base_heights or base_heights[base] <= 0:
-                    continue
-                h = base_heights[base]
-                color = MISMATCH_COLORS.get(base, (160, 160, 160))
-                dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=color)
-                current_y -= h
-            
-            # Finally draw reference match portion (gray, on top)
-            if "ref" in base_heights and base_heights["ref"] > 0:
-                h = base_heights["ref"]
-                dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=(180, 180, 180))
-                current_y -= h
-        else:
-            # Old logic (used when no reference sequence)
-            bp_per_px = (end - start) / float(width)
-            ref_pos = start + int((x + 0.5) * bp_per_px)
-            ref_base = None
-            if ref_seq and ref_pos >= start and ref_pos < end:
-                ref_idx = ref_pos - start
-                if ref_idx < len(ref_seq):
-                    ref_base = ref_seq[ref_idx].upper()
-            
-            # Calculate height for each base (proportional)
-            base_heights = {}
-            total_height_used = 0
-            for base in ["A", "C", "G", "T", "N"]:
-                count = dist.get(base, 0)
-                if count > 0:
-                    h = int(bar_height * count / depth)
-                    base_heights[base] = h
-                    total_height_used += h
-            
-            # Adjust heights to ensure full fill
-            if total_height_used < bar_height and base_heights:
-                max_base = max(base_heights.items(), key=lambda x: x[1])[0]
-                base_heights[max_base] += (bar_height - total_height_used)
-            
-            # Bottom position
-            bar_bottom = y + height
-            current_y = bar_bottom
-            
-            # First draw variant bases (non-reference bases)
-            for base in ["A", "C", "G", "T", "N"]:
-                if base not in base_heights:
-                    continue
-                h = base_heights[base]
-                if h <= 0:
-                    continue
-                
-                # Skip reference base, draw later
-                if ref_base and base == ref_base:
-                    continue
-                
-                color = MISMATCH_COLORS.get(base, (160, 160, 160))
-                dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=color)
-                current_y -= h
-            
-            # Finally draw reference base (gray, on top)
-            if ref_base and ref_base in base_heights and base_heights[ref_base] > 0:
-                h = base_heights[ref_base]
-                dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=(180, 180, 180))
+            h = base_heights[base]
+            color = MISMATCH_COLORS.get(base, (160, 160, 160))
+            dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=color)
+            current_y -= h
+        
+        # Finally draw reference match portion (gray, on top)
+        if "ref" in base_heights and base_heights["ref"] > 0:
+            h = base_heights["ref"]
+            dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=(180, 180, 180))
     
     return height
 
