@@ -20,7 +20,7 @@ echo ""
 
 # SVG
 echo "1. 生成 SVG 格式..."
-python3 -m bamsnap_lrs snap \
+bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.svg \
@@ -39,7 +39,7 @@ fi
 
 # PDF
 echo "2. 生成 PDF 格式..."
-python3 -m bamsnap_lrs snap \
+bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.pdf \
@@ -56,3 +56,13 @@ else
     echo "✗ PDF output failed"
 fi
 
+
+# RNA
+bin/bamsnap-lrs rna \
+	--bam example/rna/testbam.look/Cdec_SDR_X_CdecF-adult3.full-lenth.bam \
+	--pos Cdec_SDR_X:200000-300000 \
+	--out example/rna/testbam.look/output.svg \
+	--fa example/rna/testbam.look/Cdec_SDR_X.fasta \
+	--use-fa \
+	--show-axis \
+	--width 4000

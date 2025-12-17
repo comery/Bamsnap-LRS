@@ -48,17 +48,26 @@ pip install cairosvg
 
 ## 🚀 Quick Start
 
-### Basic Usage
+### Basic Usage (DNA)
 ```bash
-python -m bamsnap_lrs snap \
+bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out snapshot.svg
 ```
 
+### RNA Analysis
+```bash
+bin/bamsnap-lrs rna \
+    --bam your_rna_alignments.bam \
+    --pos chr1:1000000-1001000 \
+    --out rna_snapshot.svg \
+    --coverage-height 100
+```
+
 ### With Reference Genome (for mismatch detection)
 ```bash
-python -m bamsnap_lrs snap \
+bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out snapshot.svg \
@@ -69,7 +78,7 @@ python -m bamsnap_lrs snap \
 
 ### Full Example
 ```bash
-python -m bamsnap_lrs snap \
+bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --out example/test_output.svg \
@@ -83,7 +92,9 @@ python -m bamsnap_lrs snap \
 
 ## 📖 Command Reference
 
-### `snap` - Generate genome snapshot
+### `dna` / `rna` - Generate genome snapshot
+
+Both commands support similar options, with `rna` adding support for splice junction visualization.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -133,28 +144,34 @@ Individual reads are displayed with:
 
 ### SVG Output
 ```bash
-python -m bamsnap_lrs snap --bam data.bam --pos chr1:1000-2000 --out result.svg
+python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
 ```
 Best for publications, presentations, and web embedding.
 
 ### PDF Output
 ```bash
-python -m bamsnap_lrs snap --bam data.bam --pos chr1:1000-2000 --out result.pdf
+python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
 ```
 Requires `cairosvg` package. Ideal for print-quality documents.
 
 ### PNG Output
 ```bash
-python -m bamsnap_lrs snap --bam data.bam --pos chr1:1000-2000 --out result.png
+python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
 ```
 Quick raster output for previews.
+
+### RNA Output
+```bash
+python -m bamsnap_lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
+```
+Includes splice junction arcs.
 
 ## 🔧 Advanced Usage
 
 ### Using MD/CS Tags
 If your BAM file has MD or cs tags (common with minimap2), you can use them for mismatch detection:
 ```bash
-python -m bamsnap_lrs snap \
+python -m bamsnap_lrs dna \
     --bam alignments.bam \
     --pos chr1:1000-2000 \
     --out output.svg \
@@ -163,7 +180,7 @@ python -m bamsnap_lrs snap \
 
 ### Customizing Appearance
 ```bash
-python -m bamsnap_lrs snap \
+python -m bamsnap_lrs dna \
     --bam alignments.bam \
     --pos chr1:1000-2000 \
     --out output.svg \
@@ -203,6 +220,16 @@ Both images show the same genomic region with similar visual elements:
 - Color-coded variants (mismatches, insertions, deletions)
 
 The key difference is that Bamsnap-LRS generates this output as a static file without requiring a web server, making it ideal for publications and batch processing.
+
+### RNA Mode Visualization
+
+Bamsnap-LRS supports RNA-seq data visualization with splice junction arcs:
+
+![RNA Mode Output](example/test.rna.svg)
+
+- **Pink Arcs**: Represent splice junctions (introns) or split reads
+- **Arc Anchor**: Positioned at the center of the coverage track
+- **Layout**: Coverage track is automatically padded to accommodate arcs
 
 ## 📁 Project Structure
 

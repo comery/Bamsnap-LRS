@@ -96,6 +96,18 @@ def parse_cs(cs: str) -> List[Tuple[str, int]]:
                 j += 1
             res.append(("D", j - (i + 1)))
             i = j
+        elif c == "~":
+            # Intron: ~[a-z][a-z][0-9]+[a-z][a-z]
+            # Skip 2 chars (donor)
+            j = i + 3
+            # Read length
+            k = j
+            while k < n and cs[k].isdigit():
+                k += 1
+            length = int(cs[j:k])
+            # Skip 2 chars (acceptor)
+            i = k + 2
+            res.append(("N", length))
         else:
             i += 1
     return res
@@ -115,6 +127,8 @@ def from_cigar_md_cs(cigar: str, md: Optional[str] = None, cs: Optional[str] = N
                 out.append(Segment("ins", "I", d_len, 0, d_len))
             elif d_op == "D":
                 out.append(Segment("del", "D", d_len, d_len, 0))
+            elif d_op == "N":
+                out.append(Segment("ref_skip", "N", d_len, d_len, 0))
         return merge_segments(out)
     detail = parse_md(md) if md else None
     for op, l in ops:

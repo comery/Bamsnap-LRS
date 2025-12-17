@@ -32,6 +32,7 @@ def render_svg_snapshot(
     show_insertion_labels: bool = True,
     coverage_max_depth: Optional[int] = None,
     margin: int = 20,  # Left and right margins
+    is_rna: bool = False,
 ) -> str:
     """Render snapshot as SVG string"""
     # Actual drawing area width (excluding left and right margins)
@@ -47,7 +48,8 @@ def render_svg_snapshot(
     
     coverage_track_height = 0
     if show_coverage:
-        coverage_track_height = coverage_height + 15
+        # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
+        coverage_track_height = 15 + coverage_height + coverage_height + 15
     
     track_header_height = 15
     reads_area_height = (max(stacks) + 1) * (read_height + 1) + 5
@@ -139,6 +141,19 @@ def render_svg_snapshot(
         })
         header_text.text = f"{track_title} - Coverage"
         current_y += 15
+        
+        # Calculate max arc height to adjust spacing
+        # Max arc height is roughly half coverage height (h = min(w // 2, coverage_height))
+        # but in practice arcs can go up to coverage_height.
+        # We need to push the coverage track down by at least coverage_height so arcs don't overlap header.
+        # The arcs are drawn anchored at the middle of the coverage track and go UP.
+        # Max height of arc is limited by min(w//2, coverage_height).
+        # So we should add padding above the coverage track.
+        
+        # Add padding for arcs (at least coverage_height/2, maybe more)
+        # Let's add coverage_height of padding to be safe.
+        padding_for_arcs = coverage_height
+        current_y += padding_for_arcs
         
         # Calculate base distribution (original resolution, independent for each base position)
         pile = base_pileup(reads, start, end)
@@ -315,7 +330,7 @@ def render_svg_snapshot(
                 if "ref" in base_heights and base_heights["ref"] > excess:
                     base_heights["ref"] -= excess
             
-            # Draw from bottom to top
+            # Draw coverage bar (same for RNA and DNA mode)
             bar_bottom = current_y + coverage_height
             current_stack_y = bar_bottom
             
@@ -344,6 +359,92 @@ def render_svg_snapshot(
                     "height": str(h),
                     "fill": "#b4b4b4"
                 })
+        
+        # Draw pink connection lines in coverage track for RNA mode
+        if is_rna and show_coverage:
+            # Pink color for arcs: #fdd1d3
+            arc_color_hex = "#fdd1d3"
+            
+            # Anchor y position: middle of the coverage track
+            arc_anchor_y = current_y + coverage_height // 2
+
+            # 1. Draw arcs for ref_skip (introns) within each read
+            for r in reads:
+                ref_cursor = r.start
+                for seg in r.segments:
+                    if seg.type == "ref_skip":
+                        # Intron within a read
+                        # Start of intron
+                        seg_start = ref_cursor
+                        # End of intron
+                        seg_end = ref_cursor + seg.ref_consumed
+                        
+                        xa = margin + int((seg_start - start) / bp_per_px)
+                        xb = margin + int((seg_end - start) / bp_per_px)
+                        xa = max(margin, min(width - margin - 1, xa))
+                        xb = max(margin, min(width - margin - 1, xb))
+                        
+                        # Skip if too small
+                        if xb - xa < 2:
+                            ref_cursor += seg.ref_consumed
+                            continue
+                            
+                        # Draw arc
+                        w = xb - xa
+                        h = min(w // 2, coverage_height)
+                        mid_x = (xa + xb) / 2
+                        ctrl_y = arc_anchor_y - 2 * h
+                        
+                        path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
+                        
+                        SubElement(svg, "path", {
+                            "d": path_d,
+                            "fill": "none",
+                            "stroke": arc_color_hex,
+                            "stroke-opacity": "0.6",
+                            "stroke-width": "0.5"
+                        })
+                        
+                    ref_cursor += seg.ref_consumed
+
+            # 2. Draw arcs for split reads (multiple BAM records for same qname)
+            # Build groups for connecting segments
+            groups_temp: Dict[str, List[int]] = {}
+            for i, r in enumerate(reads):
+                groups_temp.setdefault(r.qname, []).append(i)
+            
+            for qname, idxs in groups_temp.items():
+                if len(idxs) > 1:
+                    # Sort segments by genomic position
+                    idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
+                    for a, b in zip(idxs_sorted, idxs_sorted[1:]):
+                        # Only connect if segments are from the same transcript
+                        # and segment b starts after segment a ends (spliced)
+                        if reads[a].end < reads[b].start:
+                            xa = margin + int((reads[a].end - start) / bp_per_px)
+                            xb = margin + int((reads[b].start - start) / bp_per_px)
+                            xa = max(margin, min(width - margin - 1, xa))
+                            xb = max(margin, min(width - margin - 1, xb))
+                            
+                            # Skip if too close
+                            if xb - xa < 2:
+                                continue
+
+                            # Draw arc
+                            w = xb - xa
+                            h = min(w // 2, coverage_height)
+                            mid_x = (xa + xb) / 2
+                            ctrl_y = arc_anchor_y - 2 * h
+                            
+                            path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
+                            
+                            SubElement(svg, "path", {
+                                "d": path_d,
+                                "fill": "none",
+                                "stroke": arc_color_hex,
+                                "stroke-opacity": "0.6",
+                                "stroke-width": "1"
+                            })
         
         current_y += coverage_height + 3
     
@@ -425,14 +526,16 @@ def render_svg_snapshot(
                 color = color_for_type(t)
             
             if t == "ins":
+                # Insertion: show color but no length label in RNA mode
                 ins_color = (128, 0, 128)
                 line = SubElement(svg, "line", {
-                    "x1": str(x0_draw), "y1": str(y - 1),
-                    "x2": str(x0_draw), "y2": str(y + read_height + 1),
+                    "x1": str(x0_draw), "y1": str(y),
+                    "x2": str(x0_draw), "y2": str(y + read_height),
                     "stroke": rgb_to_hex(ins_color),
-                    "stroke-width": "2"
+                    "stroke-width": "1"
                 })
-                if show_insertion_labels and rect_idx in rect_to_seg:
+                # Only show length label in DNA mode
+                if not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
                     seg = r.segments[rect_to_seg[rect_idx]]
                     if seg and seg.length > 0:
                         text = SubElement(svg, "text", {
@@ -442,8 +545,19 @@ def render_svg_snapshot(
                             "fill": rgb_to_hex(ins_color)
                         })
                         text.text = f"I({seg.length})"
-            elif t == "del" or t == "ref_skip":
-                # Deletion shown as dark gray rectangle with 80% opacity
+            elif t == "ref_skip":
+                # Intron (N): Draw as a thin line
+                intron_color = "#B0C4DE"  # LightSteelBlue
+                y_center = y + read_height // 2
+                SubElement(svg, "line", {
+                    "x1": str(x0_draw), "y1": str(y_center),
+                    "x2": str(x1_draw), "y2": str(y_center),
+                    "stroke": intron_color,
+                    "stroke-width": "0.5"
+                })
+
+            elif t == "del":
+                # Deletion: show dark gray rectangle with 80% opacity
                 del_color = (80, 80, 80)  # Dark gray
                 rect = SubElement(svg, "rect", {
                     "x": str(x0_draw), "y": str(y),
@@ -452,8 +566,8 @@ def render_svg_snapshot(
                     "fill": rgb_to_hex(del_color),
                     "fill-opacity": "0.8"
                 })
-                # Label deletion length, color based on width
-                if show_insertion_labels and rect_idx in rect_to_seg:
+                # Only show length label in DNA mode
+                if not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
                     seg = r.segments[rect_to_seg[rect_idx]]
                     if seg and seg.length > 0:
                         label = str(seg.length)
@@ -585,23 +699,53 @@ def render_svg_snapshot(
                         "fill": arrow_fill
                     })
     
-    # Draw paired read connection lines
-    for qname, idxs in groups.items():
-        if len(idxs) > 1:
-            idxs_sorted = sorted(idxs, key=lambda i: (reads[i].start, reads[i].end))
-            for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                ya = current_y + stacks[a] * (read_height + 1)
-                yb = current_y + stacks[b] * (read_height + 1)
-                xa = margin + int((reads[a].end - start) / bp_per_px)
-                xb = margin + int((reads[b].start - start) / bp_per_px)
-                xa = max(margin, min(width - margin - 1, xa))
-                xb = max(margin, min(width - margin - 1, xb))
-                line = SubElement(svg, "line", {
-                    "x1": str(xa), "y1": str(ya + read_height // 2),
-                    "x2": str(xb), "y2": str(yb + read_height // 2),
-                    "stroke": "#50a050",
-                    "stroke-width": "1"
-                })
+    # Draw connection lines
+    if is_rna:
+        # RNA mode: connect segments of the same transcript (spliced alignments)
+        # Use a different color/style to indicate introns
+        for qname, idxs in groups.items():
+            if len(idxs) > 1:
+                # Sort segments by genomic position
+                idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
+                for a, b in zip(idxs_sorted, idxs_sorted[1:]):
+                    # Only connect if segments are from the same transcript
+                    # and segment b starts after segment a ends (spliced)
+                    if reads[a].end < reads[b].start:
+                        ya = current_y + stacks[a] * (read_height + 1)
+                        yb = current_y + stacks[b] * (read_height + 1)
+                        xa = margin + int((reads[a].end - start) / bp_per_px)
+                        xb = margin + int((reads[b].start - start) / bp_per_px)
+                        xa = max(margin, min(width - margin - 1, xa))
+                        xb = max(margin, min(width - margin - 1, xb))
+                        # Draw dark gray line connecting the two segments (similar to deletion style)
+                        # Connect from the center of the end of segment a to the center of the start of segment b
+                        ya_center = ya + read_height // 2
+                        yb_center = yb + read_height // 2
+                        # Draw line connecting the two segments (LightSteelBlue)
+                        SubElement(svg, "line", {
+                            "x1": str(xa), "y1": str(ya_center),
+                            "x2": str(xb), "y2": str(yb_center),
+                            "stroke": "#B0C4DE",  # LightSteelBlue
+                            "stroke-width": "0.5"
+                        })
+    else:
+        # DNA mode: connect paired reads (original behavior)
+        for qname, idxs in groups.items():
+            if len(idxs) > 1:
+                idxs_sorted = sorted(idxs, key=lambda i: (reads[i].start, reads[i].end))
+                for a, b in zip(idxs_sorted, idxs_sorted[1:]):
+                    ya = current_y + stacks[a] * (read_height + 1)
+                    yb = current_y + stacks[b] * (read_height + 1)
+                    xa = margin + int((reads[a].end - start) / bp_per_px)
+                    xb = margin + int((reads[b].start - start) / bp_per_px)
+                    xa = max(margin, min(width - margin - 1, xa))
+                    xb = max(margin, min(width - margin - 1, xb))
+                    line = SubElement(svg, "line", {
+                        "x1": str(xa), "y1": str(ya + read_height // 2),
+                        "x2": str(xb), "y2": str(yb + read_height // 2),
+                        "stroke": "#50a050",
+                        "stroke-width": "1"
+                    })
     
     # Convert to string
     rough_string = tostring(svg, encoding='unicode')
