@@ -3,7 +3,7 @@ import argparse
 
 def add_common_args(parser):
     """Add common arguments to both dna and rna parsers"""
-    parser.add_argument("--bam", required=True, help="BAM file path")
+    parser.add_argument("--bam", required=True, nargs='+', help="BAM file path(s)")
     parser.add_argument("--pos", required=True, help="Genomic position, format: chr:start-end or chr:pos")
     parser.add_argument("--out", required=True, help="Output file path (supports .png, .svg, .pdf)")
     parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display")
@@ -17,7 +17,6 @@ def add_common_args(parser):
     parser.add_argument("--use-md", action="store_true", help="Use MD tag to detect mismatches")
     parser.add_argument("--use-cs", action="store_true", help="Use cs tag to detect mismatches")
     parser.add_argument("--fa", help="Reference genome FASTA file path")
-    parser.add_argument("--use-fa", action="store_true", help="Use reference genome to detect mismatches")
     parser.add_argument("--show-axis", action="store_true", help="Show coordinate axis")
     parser.add_argument("--show-composition", action="store_true", help="Show base composition chart")
     parser.add_argument("--comp-height", type=int, default=None, help="Base composition chart height")
@@ -27,13 +26,13 @@ def add_common_args(parser):
     parser.add_argument("--show-coverage", action="store_true", default=True, help="Show coverage track")
     parser.add_argument("--no-coverage", dest="show_coverage", action="store_false", help="Hide coverage track")
     parser.add_argument("--coverage-height", type=int, default=15, help="Coverage track height")
-    parser.add_argument("--track-title", type=str, default="Reads", help="Track title")
+    parser.add_argument("--track-title", type=str, nargs='+', default=["Reads"], help="Track title(s)")
     parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels")
     parser.add_argument("--no-insertion-labels", dest="show_insertion_labels", action="store_false", help="Hide insertion labels")
     parser.add_argument("--coverage-max-depth", type=int, help="Coverage track maximum depth")
 
 
-def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
+def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
     """Common rendering logic for both DNA and RNA"""
     # Determine format based on output file extension
     output_format = None
@@ -45,7 +44,7 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
     if output_format == 'svg':
         from .svg_renderer import render_svg_snapshot
         svg_content = render_svg_snapshot(
-            reads,
+            tracks,
             chrom,
             start,
             end,
@@ -55,7 +54,6 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
             show_axis=args.show_axis,
             show_coverage=args.show_coverage,
             coverage_height=args.coverage_height,
-            track_title=args.track_title,
             style=args.style,
             color_by=args.color_by,
             ref_seq=ref_seq,
@@ -79,7 +77,7 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
         # First generate SVG content
         from .svg_renderer import render_svg_snapshot
         svg_content = render_svg_snapshot(
-            reads,
+            tracks,
             chrom,
             start,
             end,
@@ -89,7 +87,6 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
             show_axis=args.show_axis,
             show_coverage=args.show_coverage,
             coverage_height=args.coverage_height,
-            track_title=args.track_title,
             style=args.style,
             color_by=args.color_by,
             ref_seq=ref_seq,
@@ -102,8 +99,10 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
     else:
         # Default PNG or other formats
         from .renderer import render_snapshot
+        # For PNG, we currently assume single track or need to update renderer.py
+        # Assuming renderer.py will be updated to take tracks
         img = render_snapshot(
-            reads,
+            tracks,
             chrom,
             start,
             end,
@@ -119,7 +118,6 @@ def render_output(reads, args, chrom, start, end, ref_seq, is_rna=False):
             comp_max_depth=args.comp_max_depth,
             show_coverage=args.show_coverage,
             coverage_height=args.coverage_height,
-            track_title=args.track_title,
             show_insertion_labels=args.show_insertion_labels,
             coverage_max_depth=args.coverage_max_depth,
             is_rna=is_rna,
@@ -157,51 +155,66 @@ def main():
         end = pos + 250
     
     # Fetch reads based on command type
+    tracks = []
+    titles = args.track_title
+    if len(titles) < len(args.bam):
+        # Extend titles if not enough provided
+        for i in range(len(titles), len(args.bam)):
+            titles.append(f"Track {i+1}")
+
     if args.cmd == "dna":
         from .reader import fetch_reads
         from .ref import get_ref_subseq
-        reads = fetch_reads(
-            args.bam,
-            chrom,
-            start,
-            end,
-            max_reads=args.max_reads,
-            mapq_min=args.mapq,
-            show_supp=args.show_supp,
-            show_secondary=args.show_secondary,
-            downsample_strategy=args.downsample_strategy,
-            use_md=args.use_md,
-            use_cs=args.use_cs,
-            use_ref=args.use_fa,
-            fa_path=args.fa,
-        )
+        
+        for i, bam_path in enumerate(args.bam):
+            reads = fetch_reads(
+                bam_path,
+                chrom,
+                start,
+                end,
+                max_reads=args.max_reads,
+                mapq_min=args.mapq,
+                show_supp=args.show_supp,
+                show_secondary=args.show_secondary,
+                downsample_strategy=args.downsample_strategy,
+                use_md=args.use_md,
+                use_cs=args.use_cs,
+                use_ref=bool(args.fa),
+                fa_path=args.fa,
+            )
+            tracks.append({"reads": reads, "title": titles[i]})
+            
         ref_seq = None
-        if args.use_fa and args.fa:
+        if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
-        render_output(reads, args, chrom, start, end, ref_seq, is_rna=False)
+        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False)
     
     elif args.cmd == "rna":
         from .reader import fetch_rna_reads
         from .ref import get_ref_subseq
-        reads = fetch_rna_reads(
-            args.bam,
-            chrom,
-            start,
-            end,
-            max_reads=args.max_reads,
-            mapq_min=args.mapq,
-            show_supp=args.show_supp,
-            show_secondary=args.show_secondary,
-            downsample_strategy=args.downsample_strategy,
-            use_md=args.use_md,
-            use_cs=args.use_cs,
-            use_ref=args.use_fa,
-            fa_path=args.fa,
-        )
+        
+        for i, bam_path in enumerate(args.bam):
+            reads = fetch_rna_reads(
+                bam_path,
+                chrom,
+                start,
+                end,
+                max_reads=args.max_reads,
+                mapq_min=args.mapq,
+                show_supp=args.show_supp,
+                show_secondary=args.show_secondary,
+                downsample_strategy=args.downsample_strategy,
+                use_md=args.use_md,
+                use_cs=args.use_cs,
+                use_ref=bool(args.fa),
+                fa_path=args.fa,
+            )
+            tracks.append({"reads": reads, "title": titles[i]})
+            
         ref_seq = None
-        if args.use_fa and args.fa:
+        if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
-        render_output(reads, args, chrom, start, end, ref_seq, is_rna=True)
+        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=True)
 
 
 if __name__ == "__main__":

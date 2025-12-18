@@ -70,7 +70,6 @@ bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out snapshot.svg \
-    --use-fa \
     --fa reference.fasta \
     --show-axis
 ```
@@ -81,7 +80,6 @@ bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --out example/test_output.svg \
-    --use-fa \
     --fa example/chm13v2.chrM.fasta \
     --show-axis \
     --show-coverage \
@@ -101,7 +99,6 @@ Both commands support similar options, with `rna` adding support for splice junc
 | `--pos` | Genomic position (`chr:start-end` or `chr:pos`) (required) | - |
 | `--out` | Output file path (`.svg`, `.pdf`, `.png`) (required) | - |
 | `--fa` | Reference FASTA file path | - |
-| `--use-fa` | Use reference genome for mismatch detection | False |
 | `--width` | Image width in pixels | 1200 |
 | `--read-height` | Height of each read in pixels | 6 |
 | `--max-reads` | Maximum number of reads to display | 300 |

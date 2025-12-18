@@ -29,11 +29,10 @@ pip3 install --user -r requirements.txt
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
 # 生成 PNG 格式
-python3 -m bamsnap_lrs snap \
+python3 -m bamsnap_lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.png \
-    --use-fa \
     --fa example/chm13v2.chrM.fasta \
     --show-axis \
     --show-coverage \
@@ -41,11 +40,10 @@ python3 -m bamsnap_lrs snap \
     --width 1200
 
 # 生成 SVG 格式
-python3 -m bamsnap_lrs snap \
+python3 -m bamsnap_lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.svg \
-    --use-fa \
     --fa example/chm13v2.chrM.fasta \
     --show-axis \
     --show-coverage \
@@ -53,11 +51,10 @@ python3 -m bamsnap_lrs snap \
     --width 1200
 
 # 生成 PDF 格式
-python3 -m bamsnap_lrs snap \
+python3 -m bamsnap_lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.pdf \
-    --use-fa \
     --fa example/chm13v2.chrM.fasta \
     --show-axis \
     --show-coverage \

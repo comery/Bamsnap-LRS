@@ -24,7 +24,6 @@ bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.svg \
-    --use-fa \
     --fa "$FASTA" \
     --show-axis \
     --show-coverage \
@@ -43,7 +42,6 @@ bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.pdf \
-    --use-fa \
     --fa "$FASTA" \
     --show-axis \
     --show-coverage \
@@ -63,6 +61,5 @@ bin/bamsnap-lrs rna \
 	--pos Cdec_SDR_X:200000-300000 \
 	--out example/rna/testbam.look/output.svg \
 	--fa example/rna/testbam.look/Cdec_SDR_X.fasta \
-	--use-fa \
 	--show-axis \
 	--width 4000
