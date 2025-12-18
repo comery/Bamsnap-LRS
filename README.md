@@ -221,7 +221,7 @@ The key difference is that Bamsnap-LRS generates this output as a static file wi
 
 Bamsnap-LRS supports RNA-seq data visualization with splice junction arcs:
 
-![RNA Mode Output](example/test.rna.svg)
+![RNA Mode Output](example/rna/test.rna.svg)
 
 - **Pink Arcs**: Represent splice junctions (introns) or split reads
 - **Arc Anchor**: Positioned at the center of the coverage track

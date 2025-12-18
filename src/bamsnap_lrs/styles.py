@@ -16,8 +16,8 @@ TYPE_COLORS = {
     "ins": (128, 0, 128),  # Purple for insertions (like JBrowse)
     "del": (128, 128, 128),  # Dark gray for deletions
     "ref_skip": (240, 240, 240),
-    "soft": (211, 211, 211),  # Gray like match
-    "hard": (211, 211, 211),  # Gray like match
+    "soft": (171, 219, 227),  # Gray like match
+    "hard": (118, 181, 197),  # Gray like match
 }
 
 # JBrowse-style colors for mismatches (more vibrant)

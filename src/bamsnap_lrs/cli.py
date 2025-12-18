@@ -3,31 +3,31 @@ import argparse
 
 def add_common_args(parser):
     """Add common arguments to both dna and rna parsers"""
-    parser.add_argument("--bam", required=True, nargs='+', help="BAM file path(s)")
+    parser.add_argument("--bam", required=True, nargs='+', action='extend', help="BAM file path(s)")
     parser.add_argument("--pos", required=True, help="Genomic position, format: chr:start-end or chr:pos")
     parser.add_argument("--out", required=True, help="Output file path (supports .png, .svg, .pdf)")
-    parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display")
-    parser.add_argument("--mapq", type=int, default=0, help="Minimum MAPQ value")
+    parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display, [300]")
+    parser.add_argument("--mapq", type=int, default=0, help="Minimum MAPQ value, [0]")
     parser.add_argument("--show-supp", action="store_true", help="Show supplementary alignments")
     parser.add_argument("--show-secondary", action="store_true", help="Show secondary alignments")
-    parser.add_argument("--width", type=int, default=1200, help="Image width (pixels)")
+    parser.add_argument("--width", type=int, default=1200, help="Image width (pixels), [1200]")
     parser.add_argument("--read-height", type=int, default=6, help="Height of each read (pixels)")
-    parser.add_argument("--detail", choices=["low", "mid", "high"], default="mid", help="Detail level")
-    parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy")
+    parser.add_argument("--detail", choices=["low", "mid", "high"], default="mid", help="Detail level, [mid]")
+    parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy, [mapq]")
     parser.add_argument("--use-md", action="store_true", help="Use MD tag to detect mismatches")
     parser.add_argument("--use-cs", action="store_true", help="Use cs tag to detect mismatches")
     parser.add_argument("--fa", help="Reference genome FASTA file path")
     parser.add_argument("--show-axis", action="store_true", help="Show coordinate axis")
     parser.add_argument("--show-composition", action="store_true", help="Show base composition chart")
-    parser.add_argument("--comp-height", type=int, default=None, help="Base composition chart height")
-    parser.add_argument("--style", choices=["default", "jbrowse"], default="jbrowse", help="Rendering style")
-    parser.add_argument("--color-by", choices=["type", "base", "strand", "mapq"], default="type", help="Coloring method")
+    parser.add_argument("--comp-height", type=int, default=None, help="Base composition chart height, [None]")
+    parser.add_argument("--style", choices=["default", "jbrowse"], default="jbrowse", help="Rendering style, [jbrowse]")
+    parser.add_argument("--color-by", choices=["type", "base", "strand", "mapq"], default="type", help="Coloring method, [type]")
     parser.add_argument("--comp-max-depth", type=int, help="Base composition chart maximum depth")
-    parser.add_argument("--show-coverage", action="store_true", default=True, help="Show coverage track")
+    parser.add_argument("--show-coverage", action="store_true", default=True, help="Show coverage track, [True]")
     parser.add_argument("--no-coverage", dest="show_coverage", action="store_false", help="Hide coverage track")
-    parser.add_argument("--coverage-height", type=int, default=15, help="Coverage track height")
-    parser.add_argument("--track-title", type=str, nargs='+', default=["Reads"], help="Track title(s)")
-    parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels")
+    parser.add_argument("--coverage-height", type=int, default=15, help="Coverage track height, [15]")
+    parser.add_argument("--track-title", type=str, nargs='+', action='extend', help="Track title(s)")
+    parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels, [True]")
     parser.add_argument("--no-insertion-labels", dest="show_insertion_labels", action="store_false", help="Hide insertion labels")
     parser.add_argument("--coverage-max-depth", type=int, help="Coverage track maximum depth")
 
@@ -156,7 +156,7 @@ def main():
     
     # Fetch reads based on command type
     tracks = []
-    titles = args.track_title
+    titles = args.track_title if args.track_title else []
     if len(titles) < len(args.bam):
         # Extend titles if not enough provided
         for i in range(len(titles), len(args.bam)):

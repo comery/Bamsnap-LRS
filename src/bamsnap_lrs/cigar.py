@@ -9,6 +9,7 @@ class Segment:
     length: int
     ref_consumed: int
     read_consumed: int
+    read_seq: Optional[str] = None
 
 
 def parse_cigar_string(cigar: str) -> List[Tuple[str, int]]:
@@ -69,7 +70,7 @@ def parse_md(md: str) -> List[Tuple[str, int]]:
     return res
 
 
-def parse_cs(cs: str) -> List[Tuple[str, int]]:
+def parse_cs(cs: str) -> List[Tuple[str, int, Optional[str]]]:
     res = []
     i = 0
     n = len(cs)
@@ -79,22 +80,23 @@ def parse_cs(cs: str) -> List[Tuple[str, int]]:
             j = i + 1
             while j < n and cs[j].isdigit():
                 j += 1
-            res.append(("=", int(cs[i + 1:j])))
+            res.append(("=", int(cs[i + 1:j]), None))
             i = j
         elif c == "*":
-            res.append(("X", 1))
+            res.append(("X", 1, cs[i+2])) # *ag (ref a, read g)
             i += 3
         elif c == "+":
             j = i + 1
             while j < n and cs[j].isalpha():
                 j += 1
-            res.append(("I", j - (i + 1)))
+            ins_seq = cs[i+1:j]
+            res.append(("I", j - (i + 1), ins_seq))
             i = j
         elif c == "-":
             j = i + 1
             while j < n and cs[j].isalpha():
                 j += 1
-            res.append(("D", j - (i + 1)))
+            res.append(("D", j - (i + 1), None))
             i = j
         elif c == "~":
             # Intron: ~[a-z][a-z][0-9]+[a-z][a-z]
@@ -107,7 +109,7 @@ def parse_cs(cs: str) -> List[Tuple[str, int]]:
             length = int(cs[j:k])
             # Skip 2 chars (acceptor)
             i = k + 2
-            res.append(("N", length))
+            res.append(("N", length, None))
         else:
             i += 1
     return res
@@ -118,13 +120,13 @@ def from_cigar_md_cs(cigar: str, md: Optional[str] = None, cs: Optional[str] = N
     out: List[Segment] = []
     if cs:
         detail = parse_cs(cs)
-        for d_op, d_len in detail:
+        for d_op, d_len, d_seq in detail:
             if d_op == "=":
                 out.append(Segment("match", "=", d_len, d_len, d_len))
             elif d_op == "X":
                 out.append(Segment("mismatch", "X", 1, 1, 1))
             elif d_op == "I":
-                out.append(Segment("ins", "I", d_len, 0, d_len))
+                out.append(Segment("ins", "I", d_len, 0, d_len, read_seq=d_seq))
             elif d_op == "D":
                 out.append(Segment("del", "D", d_len, d_len, 0))
             elif d_op == "N":
@@ -208,7 +210,8 @@ def from_cigar_with_ref(cigar: str, read_seq: str, ref_seq: str) -> List[Segment
             ri += l
             fi += l
         elif op == "I":
-            out.append(Segment("ins", "I", l, 0, l))
+            ins_seq = read_seq[ri:ri+l] if read_seq and ri+l <= len(read_seq) else None
+            out.append(Segment("ins", "I", l, 0, l, read_seq=ins_seq))
             ri += l
         elif op == "D":
             out.append(Segment("del", "D", l, l, 0))

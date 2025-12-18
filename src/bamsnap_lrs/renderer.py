@@ -59,7 +59,7 @@ def render_snapshot(
     reads = []
     for t in tracks:
         reads.extend(t['reads'])
-        
+
     bp_per_px = (end - start) / float(width)
     spans = [(max(r.start, start), min(r.end, end)) for r in reads]
     stacks = assign_stacks(spans, max_stack=max(1, len(reads)))
@@ -137,7 +137,7 @@ def render_snapshot(
                 y_center = y + read_height // 2
                 dr.line([(x0, y_center), (x1, y_center)], fill=(176, 196, 222), width=1)
             elif t == "del":
-                dr.rectangle([(x0, y), (x1, y + read_height)], outline=(120, 120, 120), fill=None)
+                dr.rectangle([(x0, y), (x1, y + read_height)], outline=(120, 120, 120), fill=color)
             else:
                 dr.rectangle([(x0, y), (x1, y + read_height)], fill=color)
         if color_by == "base" and detail == "high" and bp_per_px <= 1 and r.seq:
@@ -279,6 +279,7 @@ def draw_coverage_track(
     max_depth: Optional[int] = None,
     margin: int = 0,  # Left margin
     is_rna: bool = False,
+    detail: str = "mid",
 ) -> int:
     """Draw coverage stacked bar chart, showing variants based on reference (JBrowse style)
     
@@ -411,6 +412,11 @@ def draw_coverage_track(
         bar_bottom = y + height
         current_y = bar_bottom
         
+        # If detail is low, just draw a simple gray depth bar
+        if detail == "low":
+            dr.rectangle([(draw_x, bar_bottom - bar_height), (draw_x + 1, bar_bottom)], fill=(180, 180, 180))
+            continue
+
         # First draw variant portion (in fixed order A→C→G→T→N, with corresponding colors)
         for base in ["A", "C", "G", "T", "N"]:
             if base not in base_heights or base_heights[base] <= 0:
@@ -472,14 +478,16 @@ def render_jbrowse_style(
 
     total_height = top
     
+    # Calculate aggregate coverage height if enabled
+    aggregate_coverage_h = 0
+    if show_coverage:
+        # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
+        aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
+        total_height += aggregate_coverage_h
+    
     # Calculate height for each track
     for i, track in enumerate(tracks):
         stacks = track_stacks[i]
-        
-        # Coverage track (reduced height)
-        if show_coverage:
-            # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
-            total_height += 15 + coverage_height + coverage_height + 15
         
         # Read track (reduced spacing, total height halved)
         track_header_height = 15  # Reduced header height
@@ -526,138 +534,126 @@ def render_jbrowse_style(
             dash_end = min(dash_y + 3, total_height)
             dr.line([(tick_x, dash_y), (tick_x, dash_end)], fill=(220, 220, 220), width=1)
     
+    # Draw aggregate coverage track if enabled
+    if show_coverage:
+        all_reads = []
+        for track in tracks:
+            all_reads.extend(track['reads'])
+            
+        current_y += draw_track_header(dr, "Aggregate Coverage", current_y, width, coverage_height)
+        
+        # Add padding for arcs
+        padding_for_arcs = coverage_height
+        current_y += padding_for_arcs
+        
+        # Calculate base distribution for all reads
+        base_distribution = calculate_base_distribution(all_reads, start, end, ref_seq)
+        draw_coverage_track(
+            dr, 
+            base_distribution, 
+            current_y, 
+            content_width, 
+            coverage_height, 
+            start, 
+            end, 
+            ref_seq, 
+            coverage_max_depth,
+            margin,
+            is_rna,
+            detail
+        )
+        
+        # Draw pink connection lines in coverage track for RNA mode
+        if is_rna:
+            # Create a transparent overlay for arcs
+            arc_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            dr_arc = ImageDraw.Draw(arc_layer)
+            
+            # Calculate coverage track Y position
+            coverage_track_bottom = current_y + coverage_height
+            
+            # Pink color for arcs: (253, 209, 211)
+            arc_color = (253, 209, 211, 150)
+            
+            # Anchor y position: 1/2 of coverage height
+            arc_anchor_y = coverage_track_bottom - coverage_height // 2
+
+            # 1. Draw arcs for ref_skip (introns) within each read
+            for r in all_reads:
+                ref_cursor = r.start
+                for seg in r.segments:
+                    if seg.type == "ref_skip":
+                        seg_start = ref_cursor
+                        seg_end = ref_cursor + seg.ref_consumed
+                        
+                        xa = margin + int((seg_start - start) / bp_per_px)
+                        xb = margin + int((seg_end - start) / bp_per_px)
+                        xa = max(margin, min(width - margin - 1, xa))
+                        xb = max(margin, min(width - margin - 1, xb))
+                        
+                        if xb - xa < 2:
+                            ref_cursor += seg.ref_consumed
+                            continue
+                            
+                        # Draw arc
+                        w = xb - xa
+                        h = min(w // 2, coverage_height)
+                        bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
+                        dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
+                        
+                    ref_cursor += seg.ref_consumed
+
+            # 2. Draw arcs for split reads
+            groups_temp: Dict[str, List[int]] = {}
+            for idx_r, r in enumerate(all_reads):
+                groups_temp.setdefault(r.qname, []).append(idx_r)
+            
+            for qname, idxs in groups_temp.items():
+                if len(idxs) > 1:
+                    # Sort segments by genomic position
+                    idxs_sorted = sorted(idxs, key=lambda i: all_reads[i].start)
+                    for a, b in zip(idxs_sorted, idxs_sorted[1:]):
+                        if all_reads[a].end < all_reads[b].start:
+                            xa = margin + int((all_reads[a].end - start) / bp_per_px)
+                            xb = margin + int((all_reads[b].start - start) / bp_per_px)
+                            xa = max(margin, min(width - margin - 1, xa))
+                            xb = max(margin, min(width - margin - 1, xb))
+                            
+                            if xb - xa < 2:
+                                continue
+                                
+                            w = xb - xa
+                            h = min(w // 2, coverage_height)
+                            bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
+                            dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
+            
+            # Composite arc layer
+            img = img.convert("RGBA")
+            img = Image.alpha_composite(img, arc_layer)
+            img = img.convert("RGB")
+            dr = ImageDraw.Draw(img)
+        
+        current_y += coverage_height + 15  # Padding after coverage
+
     # Iterate over tracks
     for i, track in enumerate(tracks):
         reads = track['reads']
         current_track_title = track.get('title', track_title)
         stacks = track_stacks[i]
         
-        # Draw coverage track
-        if show_coverage:
-            current_y += draw_track_header(dr, f"{current_track_title} - Coverage", current_y, width, coverage_height)
-            
-            # Add padding for arcs (at least coverage_height, maybe more)
-            # We need to push the coverage track down so arcs don't overlap header.
-            padding_for_arcs = coverage_height
-            current_y += padding_for_arcs
-            
-            # Calculate base distribution (original resolution, independent for each base position)
-            base_distribution = calculate_base_distribution(reads, start, end, ref_seq)
-            draw_coverage_track(
-                dr, 
-                base_distribution, 
-                current_y, 
-                content_width, 
-                coverage_height, 
-                start, 
-                end, 
-                ref_seq, 
-                coverage_max_depth,
-                margin,  # Pass margin
-                is_rna
-            )
-            
-            # Draw pink connection lines in coverage track for RNA mode
-            if is_rna and show_coverage:
-                # Create a transparent overlay for arcs
-                arc_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-                dr_arc = ImageDraw.Draw(arc_layer)
-                
-                # Calculate coverage track Y position
-                coverage_track_y = current_y
-                coverage_track_bottom = current_y + coverage_height
-                
-                # Pink color for arcs: (253, 209, 211) -> #fdd1d3
-                # Alpha: user requested rgba(253, 209, 211), implying opacity is handled by the color itself or implicit
-                # We'll use the hex code and set a higher opacity since the color is already light/pastel
-                arc_color = (253, 209, 211, 150) # Increased alpha to 150 (~60%) for better visibility
-                
-                # Anchor y position: 1/2 of coverage height
-                # Bottom of coverage track is current_y + coverage_height
-                # So 1/2 height from bottom is current_y + coverage_height / 2
-                arc_anchor_y = coverage_track_bottom - coverage_height // 2
-
-                # 1. Draw arcs for ref_skip (introns) within each read
-                for r in reads:
-                    ref_cursor = r.start
-                    for seg in r.segments:
-                        if seg.type == "ref_skip":
-                            seg_start = ref_cursor
-                            seg_end = ref_cursor + seg.ref_consumed
-                            
-                            xa = margin + int((seg_start - start) / bp_per_px)
-                            xb = margin + int((seg_end - start) / bp_per_px)
-                            xa = max(margin, min(width - margin - 1, xa))
-                            xb = max(margin, min(width - margin - 1, xb))
-                            
-                            if xb - xa < 2:
-                                ref_cursor += seg.ref_consumed
-                                continue
-                                
-                            # Draw arc
-                            w = xb - xa
-                            h = min(w // 2, coverage_height)
-                            bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
-                            dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
-                            
-                        ref_cursor += seg.ref_consumed
-
-                # 2. Draw arcs for split reads
-                # Get groups for connecting segments
-                groups_temp: Dict[str, List[int]] = {}
-                for idx_r, r in enumerate(reads):
-                    groups_temp.setdefault(r.qname, []).append(idx_r)
-                
-                for qname, idxs in groups_temp.items():
-                    if len(idxs) > 1:
-                        # Sort segments by genomic position
-                        idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
-                        for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                            # Only connect if segments are from the same transcript
-                            # and segment b starts after segment a ends (spliced)
-                            if reads[a].end < reads[b].start:
-                                xa = margin + int((reads[a].end - start) / bp_per_px)
-                                xb = margin + int((reads[b].start - start) / bp_per_px)
-                                xa = max(margin, min(width - margin - 1, xa))
-                                xb = max(margin, min(width - margin - 1, xb))
-                                
-                                # Skip if too close
-                                if xb - xa < 2:
-                                    continue
-                                    
-                                # Draw arc connecting xa and xb
-                                # Bounding box: [xa, y_bottom - h, xb, y_bottom + h]
-                                # Height proportional to width but capped
-                                w = xb - xa
-                                h = min(w // 2, coverage_height)
-                                
-                                # Bounding box for the ellipse
-                                bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
-                                
-                                # Draw arc (top half: 180 to 0 degrees)
-                                dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
-                
-                # Composite arc layer onto main image
-                # Main image is RGB, need to convert to RGBA for composition or just paste
-                # Since we want to blend, convert main to RGBA
-                img = img.convert("RGBA")
-                img = Image.alpha_composite(img, arc_layer)
-                img = img.convert("RGB")
-                dr = ImageDraw.Draw(img)
-            
-            current_y += coverage_height + 3  # Reduced spacing
-        
-        # Draw read track header
+        # Read track header
         reads_area_height = (max(stacks) + 1) * (read_height + 1) + 5
         current_y += draw_track_header(dr, current_track_title, current_y, width, reads_area_height)
         
         # Draw reads
+        # (Rest of the read drawing logic remains same)
+        reads_start_y = current_y
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
             groups.setdefault(r.qname, []).append(idx_r)
         
         for idx, r in enumerate(reads):
-            y = current_y + stacks[idx] * (read_height + 1)  # Reduced spacing
+            y = reads_start_y + stacks[idx] * (read_height + 1)
             rects = segments_to_pixels(r.segments, r.start, start, bp_per_px, detail=detail)
             
             # Create rect index to segment mapping, for getting insertion length
@@ -668,7 +664,7 @@ def render_jbrowse_style(
                 if seg.ref_consumed == 0:
                     if seg.type == "ins":
                         x = int((ref_cursor - start) / bp_per_px)
-                        if rect_idx < len(rects) and rects[rect_idx][0] == "ins" and rects[rect_idx][1] == x:
+                        if rect_idx < len(rects) and rects[rect_idx][0] == "ins":
                             rect_to_seg[rect_idx] = seg_idx
                             rect_idx += 1
                     continue
@@ -683,35 +679,29 @@ def render_jbrowse_style(
                 x1_draw = margin + x1
                 
                 # For insertion, check if original position is within visible area
-                # If insertion is outside the area, skip (don't clip to boundary)
                 if t == "ins":
                     if x0 < 0 or x0 > (width - 2 * margin):
                         continue
                 
-                # Limit to visible area (don't exceed x-axis)
+                # Limit to visible area
                 x0_draw = max(margin, min(width - margin, x0_draw))
                 x1_draw = max(margin, min(width - margin, x1_draw))
                 
-                # If clipped width is 0, skip (except for insertion, which is a vertical line)
                 if x1_draw <= x0_draw and t != "ins":
                     continue
                 
-                # Unified type colors regardless of strand
                 if color_by == "type":
                     color = color_for_type(t)
                 elif color_by == "mapq":
                     base_color = color_for_type(t)
                     color = shade_by_mapq(base_color, r.mapq)
                 else:
-                    # Default use type colors (regardless of strand)
                     color = color_for_type(t)
                 
                 if t == "ins":
-                    # Insertion: show color but no length label in RNA mode
                     ins_color = (128, 0, 128)  # Purple
                     dr.line([(x0_draw, y), (x0_draw, y + read_height)], fill=ins_color, width=1)
-                    # Only show length label in DNA mode
-                    if not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
+                    if detail == "high" and not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
                         seg = r.segments[rect_to_seg[rect_idx]]
                         if seg and seg.length > 0:
                             try:
@@ -722,22 +712,15 @@ def render_jbrowse_style(
                                 except:
                                     font = ImageFont.load_default()
                             label = f"I({seg.length})"
-                            # Label length above insertion position (purple)
                             dr.text((x0_draw + 2, y - 12), label, fill=ins_color, font=font)
                 elif t == "ref_skip":
-                    # RNA Intron (N): Draw as a thin line
-                    # Color: LightSteelBlue (176, 196, 222)
                     intron_color = (176, 196, 222)
                     y_center = y + read_height // 2
                     dr.line([(x0_draw, y_center), (x1_draw, y_center)], fill=intron_color, width=1)
-                    
                 elif t == "del":
-                    # Deletion (D): show dark gray rectangle with 80% opacity
-                    # Original (80, 80, 80) at 80% opacity on white = (115, 115, 115)
                     del_color = (115, 115, 115)
                     dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=del_color)
-                    # Only show length label in DNA mode
-                    if not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
+                    if detail == "high" and not is_rna and show_insertion_labels and rect_idx in rect_to_seg:
                         seg = r.segments[rect_to_seg[rect_idx]]
                         if seg and seg.length > 0:
                             try:
@@ -748,132 +731,82 @@ def render_jbrowse_style(
                                 except:
                                     font = ImageFont.load_default()
                             label = str(seg.length)
-                            # Determine text color based on deletion width
                             del_width = x1_draw - x0_draw
                             if del_width > 4:
-                                text_color = (255, 255, 255)  # White
-                                text_x = (x0_draw + x1_draw) // 2
-                                dr.text((text_x - 5, y + 1), label, fill=text_color, font=font)
+                                dr.text(((x0_draw + x1_draw) // 2 - 5, y + 1), label, fill=(255, 255, 255), font=font)
                             else:
-                                text_color = (0, 0, 0)  # Black
-                                # When width is small, text goes above deletion
-                                dr.text((x0_draw, y - 10), label, fill=text_color, font=font)
+                                dr.text((x0_draw, y - 10), label, fill=(0, 0, 0), font=font)
                 elif t == "mismatch":
-                    # For mismatches, use more vibrant colors
-                    if r.seq and detail == "high" and rect_idx in rect_to_seg:
+                    if detail != "low" and r.seq and rect_idx in rect_to_seg:
                         seg_idx = rect_to_seg[rect_idx]
-                        seg = r.segments[seg_idx]
-                        ref_cursor = r.start
-                        read_cursor = 0
-                        for s_idx, s in enumerate(r.segments):
-                            if s_idx < seg_idx:
-                                ref_cursor += s.ref_consumed
-                                read_cursor += s.read_consumed
-                            elif s_idx == seg_idx:
-                                if s.read_consumed > 0 and read_cursor < len(r.seq):
-                                    base = r.seq[read_cursor].upper()
-                                    mismatch_color = MISMATCH_COLORS.get(base, (200, 60, 60))
-                                    dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=mismatch_color)
-                                break
+                        read_cursor = sum(s.read_consumed for s in r.segments[:seg_idx])
+                        if read_cursor < len(r.seq):
+                            base = r.seq[read_cursor].upper()
+                            mismatch_color = MISMATCH_COLORS.get(base, (200, 60, 60))
+                            dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=mismatch_color)
+                        else:
+                            dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=(195, 195, 195))
                     else:
-                        dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=color)
+                        dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=(195, 195, 195))
                 else:
-                    # Positions without variants (match) shown in gray with 80% opacity
                     if t == "match":
-                        # Original (180, 180, 180) at 80% opacity on white = (195, 195, 195)
                         color = (195, 195, 195)
                     dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=color)
             
-            # Draw read direction arrow (only at read end)
+            # Read direction arrow
             if style == "jbrowse" and rects:
-                # Find read's actual end within visible area
                 read_end_px = margin + int((min(r.end, end) - start) / bp_per_px)
                 read_start_px = margin + int((max(r.start, start) - start) / bp_per_px)
-                
-                # Ensure within visible area
                 read_end_px = max(margin, min(width - margin - 1, read_end_px))
                 read_start_px = max(margin, min(width - margin - 1, read_start_px))
-                
-                # Arrow size (not exceeding half of read height)
                 head = max(3, min(read_height // 2, 5))
-                
-                # Arrow colors
-                arrow_fill = (211, 211, 211)      # True end: solid fill
-                arrow_truncated = (200, 200, 200)  # Truncated: border color
+                arrow_fill = (211, 211, 211)
+                arrow_truncated = (200, 200, 200)
                 
                 if r.reverse:
-                    # Reverse read, arrow at start position (left), pointing left
                     arrow_x = read_start_px
-                    # Check if truncated (read actual start position outside visible area)
                     is_truncated = r.start < start
-                    
-                    points = [
-                        (arrow_x, y), 
-                        (arrow_x - head, y + read_height // 2), 
-                        (arrow_x, y + read_height)
-                    ]
+                    points = [(arrow_x, y), (arrow_x - head, y + read_height // 2), (arrow_x, y + read_height)]
                     if is_truncated:
-                        # Truncated: hollow triangle (border only)
                         dr.polygon(points, outline=arrow_truncated, fill=(255, 255, 255))
                     else:
-                        # True end: solid fill
                         dr.polygon(points, fill=arrow_fill)
                 else:
-                    # Forward read, arrow at end position (right), pointing right
                     arrow_x = read_end_px
-                    # Check if truncated (read actual end position outside visible area)
                     is_truncated = r.end > end
-                    
-                    points = [
-                        (arrow_x, y), 
-                        (arrow_x + head, y + read_height // 2), 
-                        (arrow_x, y + read_height)
-                    ]
+                    points = [(arrow_x, y), (arrow_x + head, y + read_height // 2), (arrow_x, y + read_height)]
                     if is_truncated:
-                        # Truncated: hollow triangle (border only)
                         dr.polygon(points, outline=arrow_truncated, fill=(255, 255, 255))
                     else:
-                        # True end: solid fill
                         dr.polygon(points, fill=arrow_fill)
         
-        # Draw connection lines
+        # Connection lines
         if is_rna:
-            # RNA mode: connect segments of the same transcript (spliced alignments)
-            # Use a different color/style to indicate introns
             for qname, idxs in groups.items():
                 if len(idxs) > 1:
-                    # Sort segments by genomic position
                     idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
                     for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                        # Only connect if segments are from the same transcript
-                        # and segment b starts after segment a ends (spliced)
                         if reads[a].end < reads[b].start:
-                            ya = current_y + stacks[a] * (read_height + 1)
-                            yb = current_y + stacks[b] * (read_height + 1)
+                            ya_center = reads_start_y + stacks[a] * (read_height + 1) + read_height // 2
+                            yb_center = reads_start_y + stacks[b] * (read_height + 1) + read_height // 2
                             xa = margin + int((reads[a].end - start) / bp_per_px)
                             xb = margin + int((reads[b].start - start) / bp_per_px)
                             xa = max(margin, min(width - margin - 1, xa))
                             xb = max(margin, min(width - margin - 1, xb))
-                            # Connect from the center of the end of segment a to the center of the start of segment b
-                            ya_center = ya + read_height // 2
-                            yb_center = yb + read_height // 2
-                            # Draw line connecting the two segments (light blue-gray, thin)
-                            # Color: LightSteelBlue (176, 196, 222)
                             dr.line([(xa, ya_center), (xb, yb_center)], fill=(176, 196, 222), width=1)
         else:
-            # DNA mode: connect paired reads (original behavior)
             for qname, idxs in groups.items():
                 if len(idxs) > 1:
                     idxs_sorted = sorted(idxs, key=lambda i: (reads[i].start, reads[i].end))
                     for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                        ya = current_y + stacks[a] * (read_height + 1)
-                        yb = current_y + stacks[b] * (read_height + 1)
+                        ya_center = reads_start_y + stacks[a] * (read_height + 1) + read_height // 2
+                        yb_center = reads_start_y + stacks[b] * (read_height + 1) + read_height // 2
                         xa = margin + int((reads[a].end - start) / bp_per_px)
                         xb = margin + int((reads[b].start - start) / bp_per_px)
                         xa = max(margin, min(width - margin - 1, xa))
                         xb = max(margin, min(width - margin - 1, xb))
-                        dr.line([(xa, ya + read_height // 2), (xb, yb + read_height // 2)], fill=(80, 160, 80), width=1)
+                        dr.line([(xa, ya_center), (xb, yb_center)], fill=(80, 160, 80), width=1)
 
-        current_y += reads_area_height + 5
-
+        current_y = reads_start_y + reads_area_height + 5
+    
     return img

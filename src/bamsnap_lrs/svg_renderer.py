@@ -48,25 +48,27 @@ def render_svg_snapshot(
     
     # Pre-calculate stacks and height for each track
     track_meta = []
+    
+    # Calculate aggregate coverage height if needed
+    aggregate_coverage_h = 0
+    if show_coverage:
+        # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
+        aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
+        total_height += aggregate_coverage_h
+    
     for track in tracks:
         reads = track['reads']
         spans = [(max(r.start, start), min(r.end, end)) for r in reads]
         stacks = assign_stacks(spans, max_stack=max(1, len(reads)))
         
-        coverage_track_h = 0
-        if show_coverage:
-            # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
-            coverage_track_h = 15 + coverage_height + coverage_height + 15
-        
         track_header_h = 15
         reads_area_h = (max(stacks) + 1) * (read_height + 1) + 5
         
-        track_h = coverage_track_h + track_header_h + reads_area_h + 5
+        track_h = track_header_h + reads_area_h + 5
         total_height += track_h
         
         track_meta.append({
             'stacks': stacks,
-            'coverage_track_h': coverage_track_h,
             'reads_area_h': reads_area_h
         })
     
@@ -132,283 +134,14 @@ def render_svg_snapshot(
             "stroke-dasharray": "3,3"  # Dashed: 3px line, 3px gap
         })
     
-    # Iterate over tracks
-    for i, track in enumerate(tracks):
-        reads = track['reads']
-        track_title = track.get('title', 'Reads')
-        meta = track_meta[i]
-        stacks = meta['stacks']
-        
-        # Draw coverage track
-        if show_coverage:
-            # Header bar
-            SubElement(svg, "rect", {
-                "x": "0", "y": str(current_y),
-                "width": str(width),
-                "height": "15",
-                "fill": "#f5f5f5"
-            })
-            SubElement(svg, "line", {
-                "x1": "0", "y1": str(current_y + 14),
-                "x2": str(width), "y2": str(current_y + 14),
-                "stroke": "#c8c8c8",
-                "stroke-width": "1"
-            })
-            header_text = SubElement(svg, "text", {
-                "x": "5",
-                "y": str(current_y + 11),
-                "font-size": "11",
-                "fill": "black"
-            })
-            header_text.text = f"{track_title} - Coverage"
-            current_y += 15
+    # Draw aggregate coverage track if enabled
+    if show_coverage:
+        track_y_start = current_y
+        all_reads = []
+        for track in tracks:
+            all_reads.extend(track['reads'])
             
-            # Padding for arcs
-            padding_for_arcs = coverage_height
-            current_y += padding_for_arcs
-            
-            # Calculate base distribution
-            pile = base_pileup(reads, start, end)
-            num_bases = len(pile)
-            
-            # Calculate ref_match and variant bases for each position
-            base_distribution = []
-            for i_base, p in enumerate(pile):
-                ref_base = None
-                if ref_seq and i_base < len(ref_seq):
-                    ref_base = ref_seq[i_base].upper()
-                
-                ref_match = 0
-                variant_counts = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
-                
-                for base in ["A", "C", "G", "T", "N"]:
-                    count = p.get(base, 0)
-                    if count > 0:
-                        if ref_base and base == ref_base:
-                            ref_match += count
-                        else:
-                            variant_counts[base] += count
-                
-                base_distribution.append({
-                    "ref_match": ref_match,
-                    "A": variant_counts["A"],
-                    "C": variant_counts["C"],
-                    "G": variant_counts["G"],
-                    "T": variant_counts["T"],
-                    "N": variant_counts["N"],
-                    "depth": p.get("depth", 0)
-                })
-            
-            # Draw coverage stacked bar chart
-            max_cov = coverage_max_depth
-            if max_cov is None:
-                max_cov = max((b["depth"] for b in base_distribution), default=1)
-            if max_cov <= 0:
-                max_cov = 1
-            
-            # Draw y-axis scale
-            bar_bottom = current_y + coverage_height
-            bar_top = current_y
-            axis_x = margin - 2
-            
-            # Y-axis line
-            SubElement(svg, "line", {
-                "x1": str(axis_x), "y1": str(bar_top),
-                "x2": str(axis_x), "y2": str(bar_bottom),
-                "stroke": "#646464",
-                "stroke-width": "1"
-            })
-            
-            # Maximum value tick (top)
-            SubElement(svg, "line", {
-                "x1": str(axis_x - 3), "y1": str(bar_top),
-                "x2": str(axis_x), "y2": str(bar_top),
-                "stroke": "#646464",
-                "stroke-width": "1"
-            })
-            max_text = SubElement(svg, "text", {
-                "x": "2",
-                "y": str(bar_top + 6),
-                "font-size": "8",
-                "fill": "#505050"
-            })
-            max_text.text = str(max_cov)
-            
-            # Middle tick
-            mid_y = (bar_top + bar_bottom) // 2
-            mid_val = max_cov // 2
-            SubElement(svg, "line", {
-                "x1": str(axis_x - 3), "y1": str(mid_y),
-                "x2": str(axis_x), "y2": str(mid_y),
-                "stroke": "#646464",
-                "stroke-width": "1"
-            })
-            mid_text = SubElement(svg, "text", {
-                "x": "2",
-                "y": str(mid_y + 3),
-                "font-size": "8",
-                "fill": "#505050"
-            })
-            mid_text.text = str(mid_val)
-            
-            # Bottom tick (0)
-            SubElement(svg, "line", {
-                "x1": str(axis_x - 3), "y1": str(bar_bottom),
-                "x2": str(axis_x), "y2": str(bar_bottom),
-                "stroke": "#646464",
-                "stroke-width": "1"
-            })
-            zero_text = SubElement(svg, "text", {
-                "x": "2",
-                "y": str(bar_bottom),
-                "font-size": "8",
-                "fill": "#505050"
-            })
-            zero_text.text = "0"
-            
-            # Draw by pixel position
-            for px in range(content_width):
-                base_start_idx = int(px * num_bases / content_width)
-                base_end_idx = int((px + 1) * num_bases / content_width)
-                if base_end_idx <= base_start_idx:
-                    base_end_idx = base_start_idx + 1
-                if base_end_idx > num_bases:
-                    base_end_idx = num_bases
-                
-                agg_ref_match = 0
-                agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
-                agg_depth = 0
-                
-                for base_idx in range(base_start_idx, base_end_idx):
-                    dist = base_distribution[base_idx]
-                    agg_ref_match += dist.get("ref_match", 0)
-                    for base in ["A", "C", "G", "T", "N"]:
-                        agg_variants[base] += dist.get(base, 0)
-                    agg_depth += dist.get("depth", 0)
-                
-                num_positions = base_end_idx - base_start_idx
-                if num_positions > 1:
-                    import math
-                    agg_ref_match = round(agg_ref_match / num_positions)
-                    for base in agg_variants:
-                        if agg_variants[base] > 0:
-                            agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
-                    agg_depth = round(agg_depth / num_positions)
-                
-                if agg_depth == 0:
-                    continue
-                
-                draw_x = margin + px
-                bar_height = int(coverage_height * min(agg_depth / max_cov, 1.0))
-                if bar_height <= 0:
-                    continue
-                
-                base_heights = {}
-                total_count = agg_ref_match
-                for base in ["A", "C", "G", "T", "N"]:
-                    total_count += agg_variants[base]
-                
-                if total_count == 0:
-                    continue
-                
-                if agg_ref_match > 0:
-                    base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
-                
-                for base in ["A", "C", "G", "T", "N"]:
-                    count = agg_variants[base]
-                    if count > 0:
-                        h = int(bar_height * count / total_count)
-                        base_heights[base] = max(1, h) if h == 0 else h
-                
-                total_height_used = sum(base_heights.values())
-                if total_height_used < bar_height and base_heights:
-                    max_base = max(base_heights.items(), key=lambda x: x[1])[0]
-                    base_heights[max_base] += (bar_height - total_height_used)
-                elif total_height_used > bar_height:
-                    excess = total_height_used - bar_height
-                    if "ref" in base_heights and base_heights["ref"] > excess:
-                        base_heights["ref"] -= excess
-                
-                current_stack_y = bar_bottom
-                for base in ["A", "C", "G", "T", "N"]:
-                    if base not in base_heights or base_heights[base] <= 0:
-                        continue
-                    h = base_heights[base]
-                    color = rgb_to_hex(MISMATCH_COLORS.get(base, (160, 160, 160)))
-                    SubElement(svg, "rect", {
-                        "x": str(draw_x), "y": str(current_stack_y - h),
-                        "width": "1", "height": str(h), "fill": color
-                    })
-                    current_stack_y -= h
-                
-                if "ref" in base_heights and base_heights["ref"] > 0:
-                    h = base_heights["ref"]
-                    SubElement(svg, "rect", {
-                        "x": str(draw_x), "y": str(current_stack_y - h),
-                        "width": "1", "height": str(h), "fill": "#b4b4b4"
-                    })
-            
-            # Draw pink connection lines in coverage track for RNA mode
-            if is_rna and show_coverage:
-                arc_color_hex = "#fdd1d3"
-                arc_anchor_y = current_y + coverage_height // 2
-                
-                # 1. Ref skip arcs
-                for r in reads:
-                    ref_cursor = r.start
-                    for seg in r.segments:
-                        if seg.type == "ref_skip":
-                            seg_start = ref_cursor
-                            seg_end = ref_cursor + seg.ref_consumed
-                            xa = margin + int((seg_start - start) / bp_per_px)
-                            xb = margin + int((seg_end - start) / bp_per_px)
-                            xa = max(margin, min(width - margin - 1, xa))
-                            xb = max(margin, min(width - margin - 1, xb))
-                            
-                            if xb - xa < 2:
-                                ref_cursor += seg.ref_consumed
-                                continue
-                            
-                            w = xb - xa
-                            h = min(w // 2, coverage_height)
-                            mid_x = (xa + xb) / 2
-                            ctrl_y = arc_anchor_y - 2 * h
-                            path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
-                            SubElement(svg, "path", {
-                                "d": path_d, "fill": "none", "stroke": arc_color_hex,
-                                "stroke-opacity": "0.6", "stroke-width": "0.5"
-                            })
-                        ref_cursor += seg.ref_consumed
-                
-                # 2. Split read arcs
-                groups_temp: Dict[str, List[int]] = {}
-                for idx_r, r in enumerate(reads):
-                    groups_temp.setdefault(r.qname, []).append(idx_r)
-                
-                for qname, idxs in groups_temp.items():
-                    if len(idxs) > 1:
-                        idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
-                        for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                            if reads[a].end < reads[b].start:
-                                xa = margin + int((reads[a].end - start) / bp_per_px)
-                                xb = margin + int((reads[b].start - start) / bp_per_px)
-                                xa = max(margin, min(width - margin - 1, xa))
-                                xb = max(margin, min(width - margin - 1, xb))
-                                if xb - xa < 2:
-                                    continue
-                                w = xb - xa
-                                h = min(w // 2, coverage_height)
-                                mid_x = (xa + xb) / 2
-                                ctrl_y = arc_anchor_y - 2 * h
-                                path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
-                                SubElement(svg, "path", {
-                                    "d": path_d, "fill": "none", "stroke": arc_color_hex,
-                                    "stroke-opacity": "0.6", "stroke-width": "1"
-                                })
-            
-            current_y += coverage_height + 3
-        
-        # Draw read track header
+        # Header bar
         SubElement(svg, "rect", {
             "x": "0", "y": str(current_y),
             "width": str(width),
@@ -427,16 +160,302 @@ def render_svg_snapshot(
             "font-size": "11",
             "fill": "black"
         })
-        header_text.text = track.get("title", "Reads")
+        header_text.text = "Aggregate Coverage"
+        current_y += 15
+        
+        # Padding for arcs
+        padding_for_arcs = coverage_height
+        current_y += padding_for_arcs
+        
+        # Calculate base distribution for all reads
+        pile = base_pileup(all_reads, start, end)
+        num_bases = len(pile)
+        
+        # Calculate ref_match and variant bases for each position
+        base_distribution = []
+        for i_base, p in enumerate(pile):
+            ref_base = None
+            if ref_seq and i_base < len(ref_seq):
+                ref_base = ref_seq[i_base].upper()
+            
+            ref_match = 0
+            variant_counts = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
+            
+            for base in ["A", "C", "G", "T", "N"]:
+                count = p.get(base, 0)
+                if count > 0:
+                    if ref_base and base == ref_base:
+                        ref_match += count
+                    else:
+                        variant_counts[base] += count
+            
+            base_distribution.append({
+                "ref_match": ref_match,
+                "A": variant_counts["A"],
+                "C": variant_counts["C"],
+                "G": variant_counts["G"],
+                "T": variant_counts["T"],
+                "N": variant_counts["N"],
+                "depth": p.get("depth", 0)
+            })
+        
+        # Draw coverage stacked bar chart
+        max_cov = coverage_max_depth
+        if max_cov is None:
+            max_cov = max((b["depth"] for b in base_distribution), default=1)
+        if max_cov <= 0:
+            max_cov = 1
+        
+        # Draw y-axis scale
+        bar_bottom = current_y + coverage_height
+        bar_top = current_y
+        axis_x = margin - 2
+        
+        # Y-axis line
+        SubElement(svg, "line", {
+            "x1": str(axis_x), "y1": str(bar_top),
+            "x2": str(axis_x), "y2": str(bar_bottom),
+            "stroke": "#646464",
+            "stroke-width": "1"
+        })
+        
+        # Maximum value tick (top)
+        SubElement(svg, "line", {
+            "x1": str(axis_x - 3), "y1": str(bar_top),
+            "x2": str(axis_x), "y2": str(bar_top),
+            "stroke": "#646464",
+            "stroke-width": "1"
+        })
+        max_text = SubElement(svg, "text", {
+            "x": "2",
+            "y": str(bar_top + 6),
+            "font-size": "8",
+            "fill": "#505050"
+        })
+        max_text.text = str(max_cov)
+        
+        # Middle tick
+        mid_y = (bar_top + bar_bottom) // 2
+        mid_val = max_cov // 2
+        SubElement(svg, "line", {
+            "x1": str(axis_x - 3), "y1": str(mid_y),
+            "x2": str(axis_x), "y2": str(mid_y),
+            "stroke": "#646464",
+            "stroke-width": "1"
+        })
+        mid_text = SubElement(svg, "text", {
+            "x": "2",
+            "y": str(mid_y + 3),
+            "font-size": "8",
+            "fill": "#505050"
+        })
+        mid_text.text = str(mid_val)
+        
+        # Bottom tick (0)
+        SubElement(svg, "line", {
+            "x1": str(axis_x - 3), "y1": str(bar_bottom),
+            "x2": str(axis_x), "y2": str(bar_bottom),
+            "stroke": "#646464",
+            "stroke-width": "1"
+        })
+        zero_text = SubElement(svg, "text", {
+            "x": "2",
+            "y": str(bar_bottom),
+            "font-size": "8",
+            "fill": "#505050"
+        })
+        zero_text.text = "0"
+        
+        # Draw by pixel position
+        import math
+        for px in range(content_width):
+            base_start_idx = int(px * num_bases / content_width)
+            base_end_idx = int((px + 1) * num_bases / content_width)
+            if base_end_idx <= base_start_idx:
+                base_end_idx = base_start_idx + 1
+            if base_end_idx > num_bases:
+                base_end_idx = num_bases
+            
+            agg_ref_match = 0
+            agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
+            agg_depth = 0
+            
+            for base_idx in range(base_start_idx, base_end_idx):
+                dist = base_distribution[base_idx]
+                agg_ref_match += dist.get("ref_match", 0)
+                for base in ["A", "C", "G", "T", "N"]:
+                    agg_variants[base] += dist.get(base, 0)
+                agg_depth += dist.get("depth", 0)
+            
+            num_positions = base_end_idx - base_start_idx
+            if num_positions > 1:
+                agg_ref_match = round(agg_ref_match / num_positions)
+                for base in agg_variants:
+                    if agg_variants[base] > 0:
+                        agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
+                agg_depth = round(agg_depth / num_positions)
+            
+            if agg_depth == 0:
+                continue
+            
+            draw_x = margin + px
+            bar_height = int(coverage_height * min(agg_depth / max_cov, 1.0))
+            if bar_height <= 0:
+                continue
+            
+            base_heights = {}
+            total_count = agg_ref_match
+            for base in ["A", "C", "G", "T", "N"]:
+                total_count += agg_variants[base]
+            
+            if total_count == 0:
+                continue
+            
+            if agg_ref_match > 0:
+                base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
+            
+            for base in ["A", "C", "G", "T", "N"]:
+                count = agg_variants[base]
+                if count > 0:
+                    h = int(bar_height * count / total_count)
+                    base_heights[base] = max(1, h) if h == 0 else h
+            
+            total_height_used = sum(base_heights.values())
+            if total_height_used < bar_height and base_heights:
+                max_base = max(base_heights.items(), key=lambda x: x[1])[0]
+                base_heights[max_base] += (bar_height - total_height_used)
+            elif total_height_used > bar_height:
+                excess = total_height_used - bar_height
+                if "ref" in base_heights and base_heights["ref"] > excess:
+                    base_heights["ref"] -= excess
+            
+            current_stack_y = bar_bottom
+            
+            # If detail is low, just draw a simple gray depth bar
+            if detail == "low":
+                SubElement(svg, "rect", {
+                    "x": str(draw_x), "y": str(current_stack_y - bar_height),
+                    "width": "1", "height": str(bar_height), "fill": "#b4b4b4"
+                })
+                continue
+
+            for base in ["A", "C", "G", "T", "N"]:
+                if base not in base_heights or base_heights[base] <= 0:
+                    continue
+                h = base_heights[base]
+                color = rgb_to_hex(MISMATCH_COLORS.get(base, (160, 160, 160)))
+                SubElement(svg, "rect", {
+                    "x": str(draw_x), "y": str(current_stack_y - h),
+                    "width": "1", "height": str(h), "fill": color
+                })
+                current_stack_y -= h
+            
+            if "ref" in base_heights and base_heights["ref"] > 0:
+                h = base_heights["ref"]
+                SubElement(svg, "rect", {
+                    "x": str(draw_x), "y": str(current_stack_y - h),
+                    "width": "1", "height": str(h), "fill": "#b4b4b4"
+                })
+        
+        # Arcs for RNA mode in aggregate coverage
+        if is_rna:
+            arc_color_hex = "#fdd1d3"
+            arc_anchor_y = track_y_start + 15 + coverage_height + coverage_height // 2
+            
+            # 1. Internal arcs (ref_skip) from all reads
+            for r in all_reads:
+                ref_cursor = r.start
+                for seg in r.segments:
+                    if seg.type == "ref_skip":
+                        seg_start = ref_cursor
+                        seg_end = ref_cursor + seg.ref_consumed
+                        xa = margin + int((seg_start - start) / bp_per_px)
+                        xb = margin + int((seg_end - start) / bp_per_px)
+                        xa = max(margin, min(width - margin - 1, xa))
+                        xb = max(margin, min(width - margin - 1, xb))
+                        
+                        if xb - xa < 2:
+                            ref_cursor += seg.ref_consumed
+                            continue
+                        
+                        w = xb - xa
+                        h = min(w // 2, coverage_height)
+                        mid_x = (xa + xb) / 2
+                        ctrl_y = arc_anchor_y - 2 * h
+                        path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
+                        SubElement(svg, "path", {
+                            "d": path_d, "fill": "none", "stroke": arc_color_hex,
+                            "stroke-opacity": "0.6", "stroke-width": "0.5"
+                        })
+                    ref_cursor += seg.ref_consumed
+            
+            # 2. Split read arcs from all reads
+            groups_temp: Dict[str, List[int]] = {}
+            for idx_r, r in enumerate(all_reads):
+                groups_temp.setdefault(r.qname, []).append(idx_r)
+            
+            for qname, idxs in groups_temp.items():
+                if len(idxs) > 1:
+                    idxs_sorted = sorted(idxs, key=lambda i: all_reads[i].start)
+                    for a, b in zip(idxs_sorted, idxs_sorted[1:]):
+                        if all_reads[a].end < all_reads[b].start:
+                            xa = margin + int((all_reads[a].end - start) / bp_per_px)
+                            xb = margin + int((all_reads[b].start - start) / bp_per_px)
+                            xa = max(margin, min(width - margin - 1, xa))
+                            xb = max(margin, min(width - margin - 1, xb))
+                            if xb - xa < 2:
+                                continue
+                            w = xb - xa
+                            h = min(w // 2, coverage_height)
+                            mid_x = (xa + xb) / 2
+                            ctrl_y = arc_anchor_y - 2 * h
+                            path_d = f"M {xa} {arc_anchor_y} Q {mid_x} {ctrl_y} {xb} {arc_anchor_y}"
+                            SubElement(svg, "path", {
+                                "d": path_d, "fill": "none", "stroke": arc_color_hex,
+                                "stroke-opacity": "0.6", "stroke-width": "1"
+                            })
+        
+        current_y = track_y_start + aggregate_coverage_h
+    
+    # Iterate over tracks
+    for i, track in enumerate(tracks):
+        reads = track['reads']
+        track_title = track.get('title', 'Reads')
+        meta = track_meta[i]
+        stacks = meta['stacks']
+        reads_area_h = meta['reads_area_h']
+        
+        # Draw read track header
+        header_y = current_y
+        SubElement(svg, "rect", {
+            "x": "0", "y": str(header_y),
+            "width": str(width),
+            "height": "15",
+            "fill": "#f5f5f5"
+        })
+        SubElement(svg, "line", {
+            "x1": "0", "y1": str(header_y + 14),
+            "x2": str(width), "y2": str(header_y + 14),
+            "stroke": "#c8c8c8",
+            "stroke-width": "1"
+        })
+        header_text = SubElement(svg, "text", {
+            "x": "5",
+            "y": str(header_y + 11),
+            "font-size": "11",
+            "fill": "black"
+        })
+        header_text.text = track_title
         current_y += 15
         
         # Draw reads
+        reads_start_y = current_y
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
             groups.setdefault(r.qname, []).append(idx_r)
         
         for idx, r in enumerate(reads):
-            y = current_y + stacks[idx] * (read_height + 1)
+            y = reads_start_y + stacks[idx] * (read_height + 1)
             rects = segments_to_pixels(r.segments, r.start, start, bp_per_px, detail=detail)
             
             rect_to_seg = {}
@@ -446,7 +465,7 @@ def render_svg_snapshot(
                 if seg.ref_consumed == 0:
                     if seg.type == "ins":
                         x = int((ref_cursor - start) / bp_per_px)
-                        if rect_idx < len(rects) and rects[rect_idx][0] == "ins" and rects[rect_idx][1] == x:
+                        if rect_idx < len(rects) and rects[rect_idx][0] == "ins":
                             rect_to_seg[rect_idx] = seg_idx
                             rect_idx += 1
                     continue
@@ -487,16 +506,16 @@ def render_svg_snapshot(
                         "x2": str(x0_draw), "y2": str(y + read_height),
                         "stroke": color_hex, "stroke-width": "1"
                     })
-                    if show_insertion_labels and detail == "high":
+                    if detail == "high" and show_insertion_labels:
                         seg_idx = rect_to_seg.get(rect_idx)
                         if seg_idx is not None:
-                            ins_seq = r.segments[seg_idx].read_seq
-                            if ins_seq:
+                            seg = r.segments[seg_idx]
+                            if seg and seg.length > 0:
                                 SubElement(svg, "text", {
                                     "x": str(x0_draw), "y": str(y - 2),
-                                    "font-size": "8", "fill": "black",
+                                    "font-size": "8", "fill": "#800080",
                                     "text-anchor": "middle"
-                                }).text = ins_seq
+                                }).text = f"I({seg.length})"
                 elif t == "ref_skip":
                     y_center = y + read_height // 2
                     SubElement(svg, "line", {
@@ -508,23 +527,56 @@ def render_svg_snapshot(
                     SubElement(svg, "rect", {
                         "x": str(x0_draw), "y": str(y),
                         "width": str(x1_draw - x0_draw), "height": str(read_height),
-                        "fill": "none", "stroke": "#787878", "stroke-width": "1"
+                        "fill": "#808080", "stroke": "none", "stroke-width": "1"
+                    })
+                    if detail == "high" and show_insertion_labels:
+                        seg_idx = rect_to_seg.get(rect_idx)
+                        if seg_idx is not None:
+                            seg = r.segments[seg_idx]
+                            if seg and seg.length > 0:
+                                del_width = x1_draw - x0_draw
+                                label = str(seg.length)
+                                if del_width > 12:  # Enough space inside
+                                    SubElement(svg, "text", {
+                                        "x": str((x0_draw + x1_draw) / 2), "y": str(y + read_height - 1),
+                                        "font-size": "7", "fill": "white",
+                                        "text-anchor": "middle"
+                                    }).text = label
+                                else:  # Too small, put above
+                                    SubElement(svg, "text", {
+                                        "x": str((x0_draw + x1_draw) / 2), "y": str(y - 2),
+                                        "font-size": "8", "fill": "black",
+                                        "text-anchor": "middle"
+                                    }).text = label
+                elif t == "mismatch":
+                    current_color_hex = color_hex
+                    if detail == "low":
+                        current_color_hex = "#c3c3c3"
+                    elif r.seq and rect_idx in rect_to_seg:
+                        seg_idx = rect_to_seg[rect_idx]
+                        read_cursor = sum(s.read_consumed for s in r.segments[:seg_idx])
+                        if read_cursor < len(r.seq):
+                            base = r.seq[read_cursor].upper()
+                            mismatch_color = MISMATCH_COLORS.get(base, (200, 60, 60))
+                            current_color_hex = rgb_to_hex(mismatch_color)
+                        else:
+                            current_color_hex = "#c3c3c3"
+                    else:
+                        current_color_hex = "#c3c3c3"
+                        
+                    SubElement(svg, "rect", {
+                        "x": str(x0_draw), "y": str(y),
+                        "width": str(x1_draw - x0_draw), "height": str(read_height),
+                        "fill": current_color_hex, "stroke": "none"
                     })
                 else:
+                    if t == "match":
+                        color_hex = "#c3c3c3"
                     SubElement(svg, "rect", {
                         "x": str(x0_draw), "y": str(y),
                         "width": str(x1_draw - x0_draw), "height": str(read_height),
                         "fill": color_hex, "stroke": "none"
                     })
-                    
-                    if color_by == "base" and detail == "high" and bp_per_px <= 1 and r.seq:
-                        # Draw base text logic (omitted for brevity in prompt but included in file)
-                        # Actually I should include it if I want it to work
-                        # But it's complex to port.
-                        # Wait, I am using `Write` so I must provide full content.
-                        # I'll check if I can skip or simplify base drawing for now.
-                        # The original code had it. I should try to include it.
-                        pass
 
             # Arrow head
             if style == "jbrowse":
@@ -553,8 +605,8 @@ def render_svg_snapshot(
                     idxs_sorted = sorted(idxs, key=lambda i: reads[i].start)
                     for a, b in zip(idxs_sorted, idxs_sorted[1:]):
                         if reads[a].end < reads[b].start:
-                            ya = current_y + stacks[a] * (read_height + 1)
-                            yb = current_y + stacks[b] * (read_height + 1)
+                            ya = reads_start_y + stacks[a] * (read_height + 1)
+                            yb = reads_start_y + stacks[b] * (read_height + 1)
                             xa = margin + int((reads[a].end - start) / bp_per_px)
                             xb = margin + int((reads[b].start - start) / bp_per_px)
                             xa = max(margin, min(width - margin - 1, xa))
@@ -571,8 +623,8 @@ def render_svg_snapshot(
                 if len(idxs) > 1:
                     idxs_sorted = sorted(idxs, key=lambda i: (reads[i].start, reads[i].end))
                     for a, b in zip(idxs_sorted, idxs_sorted[1:]):
-                        ya = current_y + stacks[a] * (read_height + 1)
-                        yb = current_y + stacks[b] * (read_height + 1)
+                        ya = reads_start_y + stacks[a] * (read_height + 1)
+                        yb = reads_start_y + stacks[b] * (read_height + 1)
                         xa = margin + int((reads[a].end - start) / bp_per_px)
                         xb = margin + int((reads[b].start - start) / bp_per_px)
                         xa = max(margin, min(width - margin - 1, xa))
@@ -582,8 +634,8 @@ def render_svg_snapshot(
                             "x2": str(xb), "y2": str(yb + read_height // 2),
                             "stroke": "#50a050", "stroke-width": "1"
                         })
-        
-        current_y += reads_area_h + 5
+
+        current_y = reads_start_y + reads_area_h + 5
 
     # Convert to string
     rough_string = tostring(svg, encoding='unicode')

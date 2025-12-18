@@ -46,7 +46,8 @@ bin/bamsnap-lrs dna \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - PDF" \
-    --width 1500
+    --width 1500 \
+	--detail high
 
 if [ $? -eq 0 ]; then
     echo "✓ PDF output success: example/chrM_1000_3000.bamsnapLRS.pdf"
@@ -54,12 +55,38 @@ else
     echo "✗ PDF output failed"
 fi
 
+# PDF
+echo "3. Multiple Bam..."
+bin/bamsnap-lrs dna \
+	--bam "$BAM" \
+	--bam "$BAM" \
+    --pos "${CHROM}:${START}-${END}" \
+    --out example/chrM_1000_3000.double.bamsnapLRS.pdf \
+    --fa "$FASTA" \
+    --show-axis \
+    --show-coverage \
+    --track-title "Test Reads - PDF" \
+    --width 1500
+
+if [ $? -eq 0 ]; then
+    echo "✓ PDF output success: example/chrM_1000_3000.double.bamsnapLRS.pdf"
+else
+    echo "✗ PDF output failed"
+fi
+
 
 # RNA
+echo "4. RNA 比对可视化..."
 bin/bamsnap-lrs rna \
-	--bam example/rna/testbam.look/Cdec_SDR_X_CdecF-adult3.full-lenth.bam \
+	--bam example/rna/test.rna.bam \
 	--pos Cdec_SDR_X:200000-300000 \
-	--out example/rna/testbam.look/output.svg \
-	--fa example/rna/testbam.look/Cdec_SDR_X.fasta \
+	--out example/rna/test.rna.svg \
+	--fa example/rna/ref.fasta \
 	--show-axis \
 	--width 4000
+
+if [ $? -eq 0 ]; then
+    echo "✓ SVG output success: example/rna/testbam.look/output.svg"
+else
+    echo "✗ SVG output failed"
+fi
