@@ -33,18 +33,17 @@ Bamsnap-LRS is a command-line tool that generates high-quality, publication-read
 - Python 3.8+
 - pysam
 - Pillow
+- cairosvg
 
 ### Install from source
 ```bash
 git clone https://github.com/comery/Bamsnap-LRS.git
 cd Bamsnap-LRS
 pip install -r requirements.txt
+chmod +x bin/bamsnap-lrs
 ```
 
-### Optional: PDF support
-```bash
-pip install cairosvg
-```
+
 
 ## 🚀 Quick Start
 
