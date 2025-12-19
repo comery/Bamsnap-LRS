@@ -12,6 +12,11 @@ Bamsnap-LRS is a command-line tool that generates high-quality, publication-read
 - **Read pileup**: Shows individual reads with proper stacking and clipping
 - **Coordinate axis**: Clear genomic position markers with gridlines
 
+### Gene Annotation
+- **GFF/GTF Support**: Visualize gene structures (exons, introns, CDS) alongside alignments
+- **JBrowse aesthetics**: Distinctive visualization of coding (CDS) and non-coding (UTR) regions
+- **Automatic stacking**: Smart layout prevents overlapping gene annotations
+
 ### Long-Read Support
 - **Optimized for long reads**: Designed specifically for PacBio and Oxford Nanopore data
 - **Large deletion handling**: Properly visualizes long deletions common in long-read alignments
@@ -81,6 +86,7 @@ bin/bamsnap-lrs dna \
     --pos chrM:1000-3000 \
     --out example/test_output.svg \
     --fa example/chm13v2.chrM.fasta \
+    --gff example/test.gff \
     --show-axis \
     --show-coverage \
     --track-title "Long Read Alignments" \
@@ -108,6 +114,7 @@ Both commands support similar options, with `rna` adding support for splice junc
 | `--no-coverage` | Hide coverage track | - |
 | `--coverage-height` | Height of coverage track | 15 |
 | `--track-title` | Title for the read track | "Reads" |
+| `--gff` | GFF/GTF file path for gene annotation | - |
 | `--style` | Rendering style (`default`, `jbrowse`) | jbrowse |
 | `--detail` | Detail level (`low`, `mid`, `high`) | mid |
 | `--show-supp` | Show supplementary alignments | False |
@@ -135,6 +142,12 @@ Individual reads are displayed with:
 - Genomic position labels with thousands separators
 - Tick marks at regular intervals
 - Vertical gridlines for easy position reference
+
+### Gene Annotation Track
+- **Cornflower Blue**: UTR regions (non-coding)
+- **Brownish Yellow**: CDS regions (coding)
+- **Thin Black Line**: Introns (with strand direction arrows)
+- **Automatic Stacking**: Multiple overlapping genes are shown on separate levels
 
 ## 📊 Output Examples
 
