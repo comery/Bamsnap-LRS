@@ -28,12 +28,13 @@ def add_common_args(parser):
     parser.add_argument("--no-coverage", dest="show_coverage", action="store_false", help="Hide coverage track")
     parser.add_argument("--coverage-height", type=int, default=15, help="Coverage track height, [15]")
     parser.add_argument("--track-title", type=str, nargs='+', action='extend', help="Track title(s)")
+    parser.add_argument("-g", "--gff", help="GFF/GTF file path for gene annotation")
     parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels, [True]")
     parser.add_argument("--no-insertion-labels", dest="show_insertion_labels", action="store_false", help="Hide insertion labels")
     parser.add_argument("--coverage-max-depth", type=int, help="Coverage track maximum depth")
 
 
-def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
+def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_genes=None):
     """Common rendering logic for both DNA and RNA"""
     # Determine format based on output file extension
     output_format = None
@@ -61,6 +62,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
             show_insertion_labels=args.show_insertion_labels,
             coverage_max_depth=args.coverage_max_depth,
             is_rna=is_rna,
+            gff_genes=gff_genes,
         )
         with open(args.out, 'w') as f:
             f.write(svg_content)
@@ -94,6 +96,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
             show_insertion_labels=args.show_insertion_labels,
             coverage_max_depth=args.coverage_max_depth,
             is_rna=is_rna,
+            gff_genes=gff_genes,
         )
         # Convert to PDF
         cairosvg.svg2pdf(bytestring=svg_content.encode('utf-8'), write_to=args.out)
@@ -122,6 +125,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
             show_insertion_labels=args.show_insertion_labels,
             coverage_max_depth=args.coverage_max_depth,
             is_rna=is_rna,
+            gff_genes=gff_genes,
         )
         img.save(args.out)
 
@@ -155,6 +159,12 @@ def main():
         start = max(0, pos - 250)
         end = pos + 250
     
+    # Fetch GFF if provided
+    gff_genes = None
+    if args.gff:
+        from .gff import parse_gff
+        gff_genes = parse_gff(args.gff, chrom, start, end)
+
     # Fetch reads based on command type
     tracks = []
     titles = args.track_title if args.track_title else []
@@ -191,7 +201,7 @@ def main():
         ref_seq = None
         if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
-        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False)
+        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_genes=gff_genes)
     
     elif args.cmd == "rna":
         from .reader import fetch_rna_reads
@@ -218,7 +228,7 @@ def main():
         ref_seq = None
         if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
-        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=True)
+        render_output(tracks, args, chrom, start, end, ref_seq, is_rna=True, gff_genes=gff_genes)
 
 
 if __name__ == "__main__":

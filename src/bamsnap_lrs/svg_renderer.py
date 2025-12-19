@@ -14,6 +14,99 @@ def rgb_to_hex(rgb: tuple) -> str:
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
 
 
+def draw_svg_track_header(svg, title, y, width):
+    """Draw track header in SVG"""
+    header_h = 15
+    SubElement(svg, "rect", {
+        "x": "0", "y": str(y),
+        "width": str(width), "height": str(header_h),
+        "fill": "#f5f5f5"
+    })
+    SubElement(svg, "line", {
+        "x1": "0", "y1": str(y + header_h - 1),
+        "x2": str(width), "y2": str(y + header_h - 1),
+        "stroke": "#c8c8c8", "stroke-width": "1"
+    })
+    SubElement(svg, "text", {
+        "x": "5", "y": str(y + 11),
+        "font-size": "11", "fill": "black"
+    }).text = title
+    return header_h
+
+
+def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, stacks):
+    """Draw gene track in SVG"""
+    header_h = draw_svg_track_header(svg, "Gene Annotation", y, width + 2 * margin)
+    current_y = y + header_h + 5
+    
+    for i, gene in enumerate(genes):
+        stack = stacks[i]
+        gene_y = current_y + stack * 20
+        mid_y = gene_y + 5
+        
+        gx0 = margin + int((max(gene.start, start) - start) / bp_per_px)
+        gx1 = margin + int((min(gene.end, end) - start) / bp_per_px)
+        
+        if gx1 <= gx0:
+            continue
+            
+        # Colors for gene features
+        color_utr = "#6495ed"  # Cornflower Blue
+        color_cds = "#c8a032"  # Brownish Yellow
+        feature_height = 10
+
+        # Intron line
+        SubElement(svg, "line", {
+            "x1": str(gx0), "y1": str(mid_y),
+            "x2": str(gx1), "y2": str(mid_y),
+            "stroke": "black", "stroke-width": "1"
+        })
+        
+        # Strand arrow only at the end
+        head_size = 5
+        if gene.strand == '+':
+            SubElement(svg, "polyline", {
+                "points": f"{gx1-head_size},{mid_y-head_size/2} {gx1},{mid_y} {gx1-head_size},{mid_y+head_size/2}",
+                "fill": "none", "stroke": "black", "stroke-width": "1"
+            })
+        elif gene.strand == '-':
+            SubElement(svg, "polyline", {
+                "points": f"{gx0+head_size},{mid_y-head_size/2} {gx0},{mid_y} {gx0+head_size},{mid_y+head_size/2}",
+                "fill": "none", "stroke": "black", "stroke-width": "1"
+            })
+
+        # Exons (UTR color)
+        for exon in gene.exons:
+            ex0 = margin + int((max(exon.start, start) - start) / bp_per_px)
+            ex1 = margin + int((min(exon.end, end) - start) / bp_per_px)
+            if ex1 > ex0:
+                SubElement(svg, "rect", {
+                    "x": str(ex0), "y": str(mid_y - feature_height / 2),
+                    "width": str(ex1 - ex0), "height": str(feature_height),
+                    "fill": color_utr
+                })
+        
+        # CDS (CDS color, same height)
+        for cds in gene.cds:
+            cx0 = margin + int((max(cds.start, start) - start) / bp_per_px)
+            cx1 = margin + int((min(cds.end, end) - start) / bp_per_px)
+            if cx1 > cx0:
+                SubElement(svg, "rect", {
+                    "x": str(cx0), "y": str(mid_y - feature_height / 2),
+                    "width": str(cx1 - cx0), "height": str(feature_height),
+                    "fill": color_cds
+                })
+                
+        # Gene name
+        SubElement(svg, "text", {
+            "x": str(gx0), "y": str(mid_y + 16),
+            "font-size": "10", "fill": "black"
+        }).text = gene.name
+
+    num_stacks = max(stacks) + 1 if stacks else 0
+    return header_h + num_stacks * 20 + 10
+
+
 def render_svg_snapshot(
     tracks: List[Dict[str, Any]],
     chrom: str,
@@ -32,6 +125,7 @@ def render_svg_snapshot(
     coverage_max_depth: Optional[int] = None,
     margin: int = 20,  # Left and right margins
     is_rna: bool = False,
+    gff_genes: Optional[List[Any]] = None,
     **kwargs
 ) -> str:
     """Render snapshot as SVG string"""
@@ -56,6 +150,17 @@ def render_svg_snapshot(
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
     
+    # Calculate gene track height if enabled
+    gene_track_h = 0
+    gene_stacks = []
+    if gff_genes:
+        gene_spans = [(g.start, g.end) for g in gff_genes]
+        gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
+        # Header (15) + Genes area
+        num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
+        gene_track_h = 15 + num_stacks * 20 + 10
+        total_height += gene_track_h
+
     for track in tracks:
         reads = track['reads']
         spans = [(max(r.start, start), min(r.end, end)) for r in reads]
@@ -416,6 +521,20 @@ def render_svg_snapshot(
                             })
         
         current_y = track_y_start + aggregate_coverage_h
+    
+    # Draw gene track if enabled
+    if gff_genes:
+        current_y += draw_svg_gene_track(
+            svg,
+            gff_genes,
+            current_y,
+            content_width,
+            start,
+            end,
+            bp_per_px,
+            margin,
+            gene_stacks
+        )
     
     # Iterate over tracks
     for i, track in enumerate(tracks):

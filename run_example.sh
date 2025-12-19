@@ -25,6 +25,7 @@ bin/bamsnap-lrs dna \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.svg \
     --fa "$FASTA" \
+	-g example/test.gff \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - SVG" \

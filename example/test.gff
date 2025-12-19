@@ -1,0 +1,23 @@
+chrM	RefSeq	gene	100	1500	.	+	.	ID=gene1;Name=OBP2B
+chrM	RefSeq	transcript	100	1500	.	+	.	ID=tx1;Parent=gene1
+chrM	RefSeq	exon	100	300	.	+	.	ID=exon1;Parent=tx1
+chrM	RefSeq	exon	500	700	.	+	.	ID=exon2;Parent=tx1
+chrM	RefSeq	exon	900	1100	.	+	.	ID=exon3;Parent=tx1
+chrM	RefSeq	exon	1300	1500	.	+	.	ID=exon4;Parent=tx1
+chrM	RefSeq	CDS	150	300	.	+	0	ID=cds1;Parent=tx1
+chrM	RefSeq	CDS	500	700	.	+	0	ID=cds2;Parent=tx1
+chrM	RefSeq	CDS	900	1050	.	+	0	ID=cds3;Parent=tx1
+
+chrM	RefSeq	gene	2000	3500	.	-	.	ID=gene2;Name=ABO
+chrM	RefSeq	transcript	2000	3500	.	-	.	ID=tx2;Parent=gene2
+chrM	RefSeq	exon	2000	2200	.	-	.	ID=exon5;Parent=tx2
+chrM	RefSeq	exon	2500	2800	.	-	.	ID=exon6;Parent=tx2
+chrM	RefSeq	exon	3200	3500	.	-	.	ID=exon7;Parent=tx2
+chrM	RefSeq	CDS	2100	2200	.	-	0	ID=cds4;Parent=tx2
+chrM	RefSeq	CDS	2500	2800	.	-	0	ID=cds5;Parent=tx2
+chrM	RefSeq	CDS	3200	3400	.	-	0	ID=cds6;Parent=tx2
+
+chrM	RefSeq	gene	1200	2500	.	+	.	ID=gene3;Name=LOC124902294
+chrM	RefSeq	transcript	1200	2500	.	+	.	ID=tx3;Parent=gene3
+chrM	RefSeq	exon	1200	1400	.	+	.	ID=exon8;Parent=tx3
+chrM	RefSeq	exon	2300	2500	.	+	.	ID=exon9;Parent=tx3

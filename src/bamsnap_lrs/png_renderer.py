@@ -29,6 +29,7 @@ def render_snapshot(
     show_insertion_labels: bool = True,
     coverage_max_depth: Optional[int] = None,
     is_rna: bool = False,
+    gff_genes: Optional[List[Any]] = None,
 ):
     # Handle backward compatibility: if tracks is list of Read, wrap it
     if tracks and not isinstance(tracks[0], dict):
@@ -53,6 +54,7 @@ def render_snapshot(
             ref_seq=ref_seq,
             show_insertion_labels=show_insertion_labels,
             coverage_max_depth=coverage_max_depth,
+            gff_genes=gff_genes,
         )
     
     # For default style, flatten reads from all tracks
@@ -434,6 +436,78 @@ def draw_coverage_track(
     return height
 
 
+def draw_gene_track(
+    dr: ImageDraw.ImageDraw,
+    genes: List[Any],
+    y: int,
+    width: int,
+    start: int,
+    end: int,
+    bp_per_px: float,
+    margin: int,
+    stacks: List[int],
+) -> int:
+    """Draw gene annotation track"""
+    header_h = draw_track_header(dr, "Gene Annotation", y, width + 2 * margin, 15)
+    current_y = y + header_h + 5
+    
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
+    except:
+        try:
+            font = ImageFont.truetype("arial.ttf", 10)
+        except:
+            font = ImageFont.load_default()
+
+    for i, gene in enumerate(genes):
+        stack = stacks[i]
+        gene_y = current_y + stack * 20
+        
+        gx0 = margin + int((max(gene.start, start) - start) / bp_per_px)
+        gx1 = margin + int((min(gene.end, end) - start) / bp_per_px)
+        
+        if gx1 <= gx0:
+            continue
+            
+        # Colors for gene features
+        color_utr = (100, 149, 237)  # Cornflower Blue
+        color_cds = (200, 160, 50)   # Brownish Yellow
+        feature_height = 10
+        mid_y = gene_y + 5
+
+        # Draw gene line (intron)
+        dr.line([(gx0, mid_y), (gx1, mid_y)], fill=(0, 0, 0), width=1)
+        
+        # Draw strand arrow only at the end of the gene
+        head_size = 5
+        if gene.strand == '+':
+            dr.line([(gx1, mid_y), (gx1 - head_size, mid_y - head_size // 2)], fill=(0, 0, 0), width=1)
+            dr.line([(gx1, mid_y), (gx1 - head_size, mid_y + head_size // 2)], fill=(0, 0, 0), width=1)
+        elif gene.strand == '-':
+            dr.line([(gx0, mid_y), (gx0 + head_size, mid_y - head_size // 2)], fill=(0, 0, 0), width=1)
+            dr.line([(gx0, mid_y), (gx0 + head_size, mid_y + head_size // 2)], fill=(0, 0, 0), width=1)
+
+        # Draw exons (UTR color)
+        for exon in gene.exons:
+            ex0 = margin + int((max(exon.start, start) - start) / bp_per_px)
+            ex1 = margin + int((min(exon.end, end) - start) / bp_per_px)
+            if ex1 > ex0:
+                dr.rectangle([(ex0, mid_y - feature_height // 2), (ex1, mid_y + feature_height // 2)], fill=color_utr)
+        
+        # Draw CDS (CDS color, same height)
+        for cds in gene.cds:
+            cx0 = margin + int((max(cds.start, start) - start) / bp_per_px)
+            cx1 = margin + int((min(cds.end, end) - start) / bp_per_px)
+            if cx1 > cx0:
+                dr.rectangle([(cx0, mid_y - feature_height // 2), (cx1, mid_y + feature_height // 2)], fill=color_cds)
+                
+        # Draw gene name
+        dr.text((gx0, mid_y + 6), gene.name, fill=(0, 0, 0), font=font)
+
+    num_stacks = max(stacks) + 1 if stacks else 0
+    return header_h + num_stacks * 20 + 10
+
+
 def render_jbrowse_style(
     tracks: List[Any],
     chrom: str,
@@ -453,6 +527,7 @@ def render_jbrowse_style(
     coverage_max_depth: Optional[int] = None,
     margin: int = 20,  # Left and right margins
     is_rna: bool = False,
+    gff_genes: Optional[List[Any]] = None,
 ) -> Image.Image:
     """Render JBrowse-style snapshot with track system and coverage chart"""
     # Handle backward compatibility: if tracks is list of Read, wrap it
@@ -485,6 +560,17 @@ def render_jbrowse_style(
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
     
+    # Calculate gene track height if enabled
+    gene_track_h = 0
+    gene_stacks = []
+    if gff_genes:
+        gene_spans = [(g.start, g.end) for g in gff_genes]
+        gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
+        # Header (15) + Genes area
+        num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
+        gene_track_h = 15 + num_stacks * 20 + 10
+        total_height += gene_track_h
+
     # Calculate height for each track
     for i, track in enumerate(tracks):
         stacks = track_stacks[i]
@@ -634,6 +720,20 @@ def render_jbrowse_style(
             dr = ImageDraw.Draw(img)
         
         current_y += coverage_height + 15  # Padding after coverage
+
+    # Draw gene track if enabled
+    if gff_genes:
+        current_y += draw_gene_track(
+            dr,
+            gff_genes,
+            current_y,
+            content_width,
+            start,
+            end,
+            bp_per_px,
+            margin,
+            gene_stacks
+        )
 
     # Iterate over tracks
     for i, track in enumerate(tracks):
