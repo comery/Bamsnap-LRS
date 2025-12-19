@@ -140,25 +140,25 @@ Individual reads are displayed with:
 
 ### SVG Output
 ```bash
-python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
+bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
 ```
 Best for publications, presentations, and web embedding.
 
 ### PDF Output
 ```bash
-python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
+bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
 ```
 Requires `cairosvg` package. Ideal for print-quality documents.
 
 ### PNG Output
 ```bash
-python -m bamsnap_lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
+bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
 ```
 Quick raster output for previews.
 
 ### RNA Output
 ```bash
-python -m bamsnap_lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
+bin/bamsnap-lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
 ```
 Includes splice junction arcs.
 
@@ -167,7 +167,7 @@ Includes splice junction arcs.
 ### Using MD/CS Tags
 If your BAM file has MD or cs tags (common with minimap2), you can use them for mismatch detection:
 ```bash
-python -m bamsnap_lrs dna \
+bin/bamsnap-lrs dna \
     --bam alignments.bam \
     --pos chr1:1000-2000 \
     --out output.svg \
@@ -176,7 +176,7 @@ python -m bamsnap_lrs dna \
 
 ### Customizing Appearance
 ```bash
-python -m bamsnap_lrs dna \
+bin/bamsnap-lrs dna \
     --bam alignments.bam \
     --pos chr1:1000-2000 \
     --out output.svg \
@@ -234,7 +234,7 @@ Bamsnap-LRS/
 ├── src/bamsnap_lrs/
 │   ├── cli.py          # Command-line interface
 │   ├── reader.py       # BAM file reading
-│   ├── renderer.py     # PNG rendering engine
+│   ├── png_renderer.py # PNG rendering engine
 │   ├── svg_renderer.py # SVG rendering engine
 │   ├── cigar.py        # CIGAR string parsing
 │   ├── pileup.py       # Coverage calculation

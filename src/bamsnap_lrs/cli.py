@@ -99,7 +99,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False):
         cairosvg.svg2pdf(bytestring=svg_content.encode('utf-8'), write_to=args.out)
     else:
         # Default PNG or other formats
-        from .renderer import render_snapshot
+        from .png_renderer import render_snapshot
         # For PNG, we currently assume single track or need to update renderer.py
         # Assuming renderer.py will be updated to take tracks
         img = render_snapshot(
