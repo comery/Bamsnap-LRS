@@ -1,4 +1,5 @@
 import argparse
+import os
 
 
 def add_common_args(parser):
@@ -160,7 +161,10 @@ def main():
     if len(titles) < len(args.bam):
         # Extend titles if not enough provided
         for i in range(len(titles), len(args.bam)):
-            titles.append(f"Track {i+1}")
+            bam_path = args.bam[i]
+            # Use filename without extension as default title
+            default_title = os.path.splitext(os.path.basename(bam_path))[0]
+            titles.append(default_title)
 
     if args.cmd == "dna":
         from .reader import fetch_reads
