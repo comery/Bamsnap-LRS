@@ -22,10 +22,10 @@ echo ""
 echo "1. 生成 SVG 格式..."
 bin/bamsnap-lrs dna \
     --bam "$BAM" \
-    --pos "${CHROM}:${START}-${END}" \
-    --out example/chrM_1000_3000.bamsnapLRS.svg \
+    --pos "${CHROM}:1-10000" \
+    --out example/chrM_1_10000.bamsnapLRS.svg \
     --fa "$FASTA" \
-	-g example/test.gff \
+	-g example/chrM.mitos2.gff \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - SVG" \
@@ -44,6 +44,7 @@ bin/bamsnap-lrs dna \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.pdf \
     --fa "$FASTA" \
+	--bed example/chrM.annot.bed \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - PDF" \
@@ -56,6 +57,7 @@ else
     echo "✗ PDF output failed"
 fi
 
+<<EOF
 # PDF
 echo "3. Multiple Bam..."
 bin/bamsnap-lrs dna \
@@ -91,3 +93,4 @@ if [ $? -eq 0 ]; then
 else
     echo "✗ SVG output failed"
 fi
+EOF

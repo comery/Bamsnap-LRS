@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, Tuple, Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .layout import segments_to_pixels, assign_stacks
+from .layout import segments_to_pixels, assign_stacks, assign_bed_stacks
 from .reader import Read
 from .pileup import base_pileup, pileup_to_pixels
 from .styles import color_for_type, color_for_base, shade_by_mapq, STRAND_COLORS, MISMATCH_COLORS
@@ -30,6 +30,7 @@ def render_snapshot(
     coverage_max_depth: Optional[int] = None,
     is_rna: bool = False,
     gff_genes: Optional[List[Any]] = None,
+    bed_features: Optional[List[Any]] = None,
 ):
     # Handle backward compatibility: if tracks is list of Read, wrap it
     if tracks and not isinstance(tracks[0], dict):
@@ -55,6 +56,7 @@ def render_snapshot(
             show_insertion_labels=show_insertion_labels,
             coverage_max_depth=coverage_max_depth,
             gff_genes=gff_genes,
+            bed_features=bed_features,
         )
     
     # For default style, flatten reads from all tracks
@@ -478,14 +480,32 @@ def draw_gene_track(
         # Draw gene line (intron)
         dr.line([(gx0, mid_y), (gx1, mid_y)], fill=(0, 0, 0), width=1)
         
-        # Draw strand arrow only at the end of the gene
-        head_size = 5
+        # Strand arrow - solid black arrow outside the feature with connecting line
+        head_size = 6
+        arrow_width = 4
+        connector_length = 3  # Short line connecting feature to arrow
         if gene.strand == '+':
-            dr.line([(gx1, mid_y), (gx1 - head_size, mid_y - head_size // 2)], fill=(0, 0, 0), width=1)
-            dr.line([(gx1, mid_y), (gx1 - head_size, mid_y + head_size // 2)], fill=(0, 0, 0), width=1)
+            # Forward strand: arrow pointing right, outside the feature
+            arrow_x = gx1 + connector_length
+            # Draw connecting line
+            dr.line([(gx1, mid_y), (arrow_x, mid_y)], fill=(0, 0, 0), width=1)
+            # Draw arrow triangle (pointing right)
+            dr.polygon([
+                (arrow_x, mid_y - arrow_width),
+                (arrow_x + head_size, mid_y),
+                (arrow_x, mid_y + arrow_width)
+            ], fill=(0, 0, 0), outline=(0, 0, 0))
         elif gene.strand == '-':
-            dr.line([(gx0, mid_y), (gx0 + head_size, mid_y - head_size // 2)], fill=(0, 0, 0), width=1)
-            dr.line([(gx0, mid_y), (gx0 + head_size, mid_y + head_size // 2)], fill=(0, 0, 0), width=1)
+            # Reverse strand: arrow pointing left, outside the feature
+            arrow_x = gx0 - connector_length
+            # Draw connecting line
+            dr.line([(gx0, mid_y), (arrow_x, mid_y)], fill=(0, 0, 0), width=1)
+            # Draw arrow triangle (pointing left)
+            dr.polygon([
+                (arrow_x, mid_y - arrow_width),
+                (arrow_x - head_size, mid_y),
+                (arrow_x, mid_y + arrow_width)
+            ], fill=(0, 0, 0), outline=(0, 0, 0))
 
         # Draw exons (UTR color)
         for exon in gene.exons:
@@ -503,6 +523,121 @@ def draw_gene_track(
                 
         # Draw gene name
         dr.text((gx0, mid_y + 6), gene.name, fill=(0, 0, 0), font=font)
+
+    num_stacks = max(stacks) + 1 if stacks else 0
+    return header_h + num_stacks * 20 + 10
+
+
+def draw_bed_track(
+    dr: ImageDraw.ImageDraw,
+    features: List[Any],
+    y: int,
+    width: int,
+    start: int,
+    end: int,
+    bp_per_px: float,
+    margin: int,
+    stacks: List[int],
+) -> int:
+    """Draw BED annotation track"""
+    header_h = draw_track_header(dr, "BED Annotation", y, width + 2 * margin, 15)
+    current_y = y + header_h + 5
+    
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
+    except:
+        try:
+            font = ImageFont.truetype("arial.ttf", 10)
+        except:
+            font = ImageFont.load_default()
+
+    for i, feat in enumerate(features):
+        stack = stacks[i]
+        feat_y = current_y + stack * 20
+        mid_y = feat_y + 5
+        
+        fx0 = margin + int((max(feat.start, start) - start) / bp_per_px)
+        fx1 = margin + int((min(feat.end, end) - start) / bp_per_px)
+        
+        if fx1 <= fx0:
+            continue
+        
+        # Default colors
+        default_color = (100, 149, 237)  # Cornflower Blue
+        thick_color = (200, 160, 50)      # Brownish Yellow
+        
+        # Use itemRgb if available
+        if feat.item_rgb:
+            color = feat.item_rgb
+        else:
+            color = default_color
+        
+        feature_height = 10
+        
+        # Draw main feature rectangle
+        dr.rectangle([(fx0, mid_y - feature_height // 2), (fx1, mid_y + feature_height // 2)], fill=color, outline=(0, 0, 0))
+        
+        # Draw thickStart/thickEnd if specified (CDS-like region)
+        if feat.thick_start is not None and feat.thick_end is not None:
+            thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
+            thick_x1 = margin + int((min(feat.thick_end, end) - start) / bp_per_px)
+            if thick_x1 > thick_x0:
+                thick_color_rgb = feat.item_rgb if feat.item_rgb else thick_color
+                dr.rectangle([(thick_x0, mid_y - feature_height // 2), (thick_x1, mid_y + feature_height // 2)], fill=thick_color_rgb, outline=(0, 0, 0))
+        
+        # Draw blocks (exons) if available
+        if feat.blocks:
+            for block in feat.blocks:
+                bx0 = margin + int((max(block.start, start) - start) / bp_per_px)
+                bx1 = margin + int((min(block.end, end) - start) / bp_per_px)
+                if bx1 > bx0:
+                    dr.rectangle([(bx0, mid_y - feature_height // 2), (bx1, mid_y + feature_height // 2)], fill=color, outline=(0, 0, 0))
+            
+            # Draw intron lines between blocks
+            if len(feat.blocks) > 1:
+                sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
+                for j in range(len(sorted_blocks) - 1):
+                    block_end = sorted_blocks[j].end
+                    next_block_start = sorted_blocks[j + 1].start
+                    if block_end < next_block_start:
+                        line_x0 = margin + int((max(block_end, start) - start) / bp_per_px)
+                        line_x1 = margin + int((min(next_block_start, end) - start) / bp_per_px)
+                        if line_x1 > line_x0:
+                            dr.line([(line_x0, mid_y), (line_x1, mid_y)], fill=(0, 0, 0), width=1)
+        else:
+            # If no blocks, draw intron line for the whole feature
+            dr.line([(fx0, mid_y), (fx1, mid_y)], fill=(0, 0, 0), width=1)
+        
+        # Strand arrow - solid black arrow outside the feature with connecting line
+        head_size = 6
+        arrow_width = 4
+        connector_length = 3  # Short line connecting feature to arrow
+        if feat.strand == '+':
+            # Forward strand: arrow pointing right, outside the feature
+            arrow_x = fx1 + connector_length
+            # Draw connecting line
+            dr.line([(fx1, mid_y), (arrow_x, mid_y)], fill=(0, 0, 0), width=1)
+            # Draw arrow triangle (pointing right)
+            dr.polygon([
+                (arrow_x, mid_y - arrow_width),
+                (arrow_x + head_size, mid_y),
+                (arrow_x, mid_y + arrow_width)
+            ], fill=(0, 0, 0), outline=(0, 0, 0))
+        elif feat.strand == '-':
+            # Reverse strand: arrow pointing left, outside the feature
+            arrow_x = fx0 - connector_length
+            # Draw connecting line
+            dr.line([(fx0, mid_y), (arrow_x, mid_y)], fill=(0, 0, 0), width=1)
+            # Draw arrow triangle (pointing left)
+            dr.polygon([
+                (arrow_x, mid_y - arrow_width),
+                (arrow_x - head_size, mid_y),
+                (arrow_x, mid_y + arrow_width)
+            ], fill=(0, 0, 0), outline=(0, 0, 0))
+        
+        # Feature name
+        if feat.name:
+            dr.text((fx0, mid_y + 6), feat.name, fill=(0, 0, 0), font=font)
 
     num_stacks = max(stacks) + 1 if stacks else 0
     return header_h + num_stacks * 20 + 10
@@ -528,6 +663,7 @@ def render_jbrowse_style(
     margin: int = 20,  # Left and right margins
     is_rna: bool = False,
     gff_genes: Optional[List[Any]] = None,
+    bed_features: Optional[List[Any]] = None,
 ) -> Image.Image:
     """Render JBrowse-style snapshot with track system and coverage chart"""
     # Handle backward compatibility: if tracks is list of Read, wrap it
@@ -560,16 +696,24 @@ def render_jbrowse_style(
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
     
-    # Calculate gene track height if enabled
-    gene_track_h = 0
+    # Calculate annotation track height if enabled
+    annotation_track_h = 0
     gene_stacks = []
+    bed_stacks = []
     if gff_genes:
         gene_spans = [(g.start, g.end) for g in gff_genes]
         gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
         # Header (15) + Genes area
         num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
-        gene_track_h = 15 + num_stacks * 20 + 10
-        total_height += gene_track_h
+        annotation_track_h = 15 + num_stacks * 20 + 10
+        total_height += annotation_track_h
+    elif bed_features:
+        bed_spans = [(f.start, f.end) for f in bed_features]
+        bed_stacks = assign_bed_stacks(bed_spans, min_distance=10, max_stack=len(bed_features))
+        # Header (15) + Features area
+        num_stacks = max(bed_stacks) + 1 if bed_stacks else 0
+        annotation_track_h = 15 + num_stacks * 20 + 10
+        total_height += annotation_track_h
 
     # Calculate height for each track
     for i, track in enumerate(tracks):
@@ -721,7 +865,7 @@ def render_jbrowse_style(
         
         current_y += coverage_height + 15  # Padding after coverage
 
-    # Draw gene track if enabled
+    # Draw annotation track if enabled
     if gff_genes:
         current_y += draw_gene_track(
             dr,
@@ -733,6 +877,18 @@ def render_jbrowse_style(
             bp_per_px,
             margin,
             gene_stacks
+        )
+    elif bed_features:
+        current_y += draw_bed_track(
+            dr,
+            bed_features,
+            current_y,
+            content_width,
+            start,
+            end,
+            bp_per_px,
+            margin,
+            bed_stacks
         )
 
     # Iterate over tracks

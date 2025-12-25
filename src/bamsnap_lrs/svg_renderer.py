@@ -3,7 +3,7 @@ from typing import List, Dict, Optional, Any
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 
-from .layout import segments_to_pixels, assign_stacks
+from .layout import segments_to_pixels, assign_stacks, assign_bed_stacks
 from .reader import Read
 from .pileup import base_pileup
 from .styles import color_for_type, color_for_base, shade_by_mapq, STRAND_COLORS, MISMATCH_COLORS
@@ -62,17 +62,37 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
             "stroke": "black", "stroke-width": "1"
         })
         
-        # Strand arrow only at the end
-        head_size = 5
+        # Strand arrow - solid black arrow outside the feature with connecting line
+        head_size = 6
+        arrow_width = 4
+        connector_length = 3  # Short line connecting feature to arrow
         if gene.strand == '+':
-            SubElement(svg, "polyline", {
-                "points": f"{gx1-head_size},{mid_y-head_size/2} {gx1},{mid_y} {gx1-head_size},{mid_y+head_size/2}",
-                "fill": "none", "stroke": "black", "stroke-width": "1"
+            # Forward strand: arrow pointing right, outside the feature
+            arrow_x = gx1 + connector_length
+            # Draw connecting line
+            SubElement(svg, "line", {
+                "x1": str(gx1), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            # Draw arrow triangle (pointing right)
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x+head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
             })
         elif gene.strand == '-':
-            SubElement(svg, "polyline", {
-                "points": f"{gx0+head_size},{mid_y-head_size/2} {gx0},{mid_y} {gx0+head_size},{mid_y+head_size/2}",
-                "fill": "none", "stroke": "black", "stroke-width": "1"
+            # Reverse strand: arrow pointing left, outside the feature
+            arrow_x = gx0 - connector_length
+            # Draw connecting line
+            SubElement(svg, "line", {
+                "x1": str(gx0), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            # Draw arrow triangle (pointing left)
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x-head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
             })
 
         # Exons (UTR color)
@@ -107,6 +127,132 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
     return header_h + num_stacks * 20 + 10
 
 
+def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, stacks):
+    """Draw BED track in SVG"""
+    header_h = draw_svg_track_header(svg, "BED Annotation", y, width + 2 * margin)
+    current_y = y + header_h + 5
+    
+    for i, feat in enumerate(features):
+        stack = stacks[i]
+        feat_y = current_y + stack * 20
+        mid_y = feat_y + 5
+        
+        fx0 = margin + int((max(feat.start, start) - start) / bp_per_px)
+        fx1 = margin + int((min(feat.end, end) - start) / bp_per_px)
+        
+        if fx1 <= fx0:
+            continue
+        
+        # Default colors
+        default_color = "#6495ed"  # Cornflower Blue
+        thick_color = "#c8a032"    # Brownish Yellow
+        
+        # Use itemRgb if available
+        if feat.item_rgb:
+            color_hex = rgb_to_hex(feat.item_rgb)
+        else:
+            color_hex = default_color
+        
+        feature_height = 10
+        
+        # Draw main feature rectangle
+        SubElement(svg, "rect", {
+            "x": str(fx0), "y": str(mid_y - feature_height / 2),
+            "width": str(fx1 - fx0), "height": str(feature_height),
+            "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
+        })
+        
+        # Draw thickStart/thickEnd if specified (CDS-like region)
+        if feat.thick_start is not None and feat.thick_end is not None:
+            thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
+            thick_x1 = margin + int((min(feat.thick_end, end) - start) / bp_per_px)
+            if thick_x1 > thick_x0:
+                thick_color_hex = rgb_to_hex(feat.item_rgb) if feat.item_rgb else thick_color
+                SubElement(svg, "rect", {
+                    "x": str(thick_x0), "y": str(mid_y - feature_height / 2),
+                    "width": str(thick_x1 - thick_x0), "height": str(feature_height),
+                    "fill": thick_color_hex, "stroke": "black", "stroke-width": "0.5"
+                })
+        
+        # Draw blocks (exons) if available
+        if feat.blocks:
+            for block in feat.blocks:
+                bx0 = margin + int((max(block.start, start) - start) / bp_per_px)
+                bx1 = margin + int((min(block.end, end) - start) / bp_per_px)
+                if bx1 > bx0:
+                    SubElement(svg, "rect", {
+                        "x": str(bx0), "y": str(mid_y - feature_height / 2),
+                        "width": str(bx1 - bx0), "height": str(feature_height),
+                        "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
+                    })
+            
+            # Draw intron lines between blocks
+            if len(feat.blocks) > 1:
+                sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
+                for j in range(len(sorted_blocks) - 1):
+                    block_end = sorted_blocks[j].end
+                    next_block_start = sorted_blocks[j + 1].start
+                    if block_end < next_block_start:
+                        line_x0 = margin + int((max(block_end, start) - start) / bp_per_px)
+                        line_x1 = margin + int((min(next_block_start, end) - start) / bp_per_px)
+                        if line_x1 > line_x0:
+                            SubElement(svg, "line", {
+                                "x1": str(line_x0), "y1": str(mid_y),
+                                "x2": str(line_x1), "y2": str(mid_y),
+                                "stroke": "black", "stroke-width": "1"
+                            })
+        else:
+            # If no blocks, draw intron line for the whole feature
+            SubElement(svg, "line", {
+                "x1": str(fx0), "y1": str(mid_y),
+                "x2": str(fx1), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+        
+        # Strand arrow - solid black arrow outside the feature with connecting line
+        head_size = 6
+        arrow_width = 4
+        connector_length = 3  # Short line connecting feature to arrow
+        if feat.strand == '+':
+            # Forward strand: arrow pointing right, outside the feature
+            arrow_x = fx1 + connector_length
+            # Draw connecting line
+            SubElement(svg, "line", {
+                "x1": str(fx1), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            # Draw arrow triangle (pointing right)
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x+head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
+            })
+        elif feat.strand == '-':
+            # Reverse strand: arrow pointing left, outside the feature
+            arrow_x = fx0 - connector_length
+            # Draw connecting line
+            SubElement(svg, "line", {
+                "x1": str(fx0), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            # Draw arrow triangle (pointing left)
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x-head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
+            })
+        
+        # Feature name
+        if feat.name:
+            SubElement(svg, "text", {
+                "x": str(fx0), "y": str(mid_y + 16),
+                "font-size": "10", "fill": "black"
+            }).text = feat.name
+
+    num_stacks = max(stacks) + 1 if stacks else 0
+    return header_h + num_stacks * 20 + 10
+
+
 def render_svg_snapshot(
     tracks: List[Dict[str, Any]],
     chrom: str,
@@ -126,6 +272,7 @@ def render_svg_snapshot(
     margin: int = 20,  # Left and right margins
     is_rna: bool = False,
     gff_genes: Optional[List[Any]] = None,
+    bed_features: Optional[List[Any]] = None,
     **kwargs
 ) -> str:
     """Render snapshot as SVG string"""
@@ -150,16 +297,24 @@ def render_svg_snapshot(
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
     
-    # Calculate gene track height if enabled
-    gene_track_h = 0
+    # Calculate annotation track height if enabled
+    annotation_track_h = 0
     gene_stacks = []
+    bed_stacks = []
     if gff_genes:
         gene_spans = [(g.start, g.end) for g in gff_genes]
         gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
         # Header (15) + Genes area
         num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
-        gene_track_h = 15 + num_stacks * 20 + 10
-        total_height += gene_track_h
+        annotation_track_h = 15 + num_stacks * 20 + 10
+        total_height += annotation_track_h
+    elif bed_features:
+        bed_spans = [(f.start, f.end) for f in bed_features]
+        bed_stacks = assign_bed_stacks(bed_spans, min_distance=10, max_stack=len(bed_features))
+        # Header (15) + Features area
+        num_stacks = max(bed_stacks) + 1 if bed_stacks else 0
+        annotation_track_h = 15 + num_stacks * 20 + 10
+        total_height += annotation_track_h
 
     for track in tracks:
         reads = track['reads']
@@ -522,7 +677,7 @@ def render_svg_snapshot(
         
         current_y = track_y_start + aggregate_coverage_h
     
-    # Draw gene track if enabled
+    # Draw annotation track if enabled
     if gff_genes:
         current_y += draw_svg_gene_track(
             svg,
@@ -534,6 +689,18 @@ def render_svg_snapshot(
             bp_per_px,
             margin,
             gene_stacks
+        )
+    elif bed_features:
+        current_y += draw_svg_bed_track(
+            svg,
+            bed_features,
+            current_y,
+            content_width,
+            start,
+            end,
+            bp_per_px,
+            margin,
+            bed_stacks
         )
     
     # Iterate over tracks
