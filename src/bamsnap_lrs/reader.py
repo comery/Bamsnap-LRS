@@ -36,9 +36,20 @@ def fetch_reads(
     fa_path: Optional[str] = None,
 ) -> List[Read]:
     import pysam
+    import os
 
     reads: List[Read] = []
-    with pysam.AlignmentFile(bam_path, "rb") as af:
+    
+    # Detect file format and prepare open parameters
+    is_cram = bam_path.lower().endswith('.cram')
+    open_mode = "rc" if is_cram else "rb"
+    open_kwargs = {}
+    
+    # For CRAM files, provide reference genome if available
+    if is_cram and fa_path and os.path.exists(fa_path):
+        open_kwargs['reference_filename'] = fa_path
+    
+    with pysam.AlignmentFile(bam_path, open_mode, **open_kwargs) as af:
         for r in af.fetch(chrom, start, end):
             if r.mapping_quality < mapq_min:
                 continue
@@ -110,18 +121,28 @@ def fetch_rna_reads(
     """Fetch RNA reads, handling spliced alignments.
     
     For RNA-seq data, a single transcript may be split into multiple alignment segments
-    (exons) due to alternative splicing. These segments appear as separate records in BAM,
+    (exons) due to alternative splicing. These segments appear as separate records in BAM/CRAM,
     typically marked as supplementary alignments. This function collects all segments
     belonging to the same transcript (same qname) and returns them as separate Read objects.
     The renderer will connect these segments with lines to show the splicing structure.
     """
     import pysam
+    import os
     
     reads: List[Read] = []
     # Track transcripts by qname to ensure we get all segments
     transcript_segments: dict[str, List[Read]] = {}
     
-    with pysam.AlignmentFile(bam_path, "rb") as af:
+    # Detect file format and prepare open parameters
+    is_cram = bam_path.lower().endswith('.cram')
+    open_mode = "rc" if is_cram else "rb"
+    open_kwargs = {}
+    
+    # For CRAM files, provide reference genome if available
+    if is_cram and fa_path and os.path.exists(fa_path):
+        open_kwargs['reference_filename'] = fa_path
+    
+    with pysam.AlignmentFile(bam_path, open_mode, **open_kwargs) as af:
         for r in af.fetch(chrom, start, end):
             if r.mapping_quality < mapq_min:
                 continue

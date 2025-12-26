@@ -1,10 +1,11 @@
 import argparse
 import os
+import sys
 
 
 def add_common_args(parser):
     """Add common arguments to both dna and rna parsers"""
-    parser.add_argument("--bam", required=True, nargs='+', action='extend', help="BAM file path(s)")
+    parser.add_argument("--bam", required=True, nargs='+', action='extend', help="BAM/CRAM file path(s)")
     parser.add_argument("--pos", required=True, help="Genomic position, format: chr:start-end or chr:pos")
     parser.add_argument("--out", required=True, help="Output file path (supports .png, .svg, .pdf)")
     parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display, [300]")
@@ -17,7 +18,7 @@ def add_common_args(parser):
     parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy, [mapq]")
     parser.add_argument("--use-md", action="store_true", help="Use MD tag to detect mismatches")
     parser.add_argument("--use-cs", action="store_true", help="Use cs tag to detect mismatches")
-    parser.add_argument("--fa", help="Reference genome FASTA file path")
+    parser.add_argument("--fa", help="Reference genome FASTA file path (required for CRAM files)")
     parser.add_argument("--show-axis", action="store_true", help="Show coordinate axis")
     parser.add_argument("--show-composition", action="store_true", help="Show base composition chart")
     parser.add_argument("--comp-height", type=int, default=None, help="Base composition chart height, [None]")
@@ -189,23 +190,68 @@ def main():
         from .reader import fetch_reads
         from .ref import get_ref_subseq
         
+        # Check if BAM files exist
+        missing_bams = []
+        for bam_path in args.bam:
+            if not os.path.exists(bam_path):
+                missing_bams.append(bam_path)
+        
+        if missing_bams:
+            print("Error: BAM file(s) not found:", file=sys.stderr)
+            for bam_path in missing_bams:
+                print(f"  - {bam_path}", file=sys.stderr)
+            sys.exit(1)
+        
+        empty_bams = []
         for i, bam_path in enumerate(args.bam):
-            reads = fetch_reads(
-                bam_path,
-                chrom,
-                start,
-                end,
-                max_reads=args.max_reads,
-                mapq_min=args.mapq,
-                show_supp=args.show_supp,
-                show_secondary=args.show_secondary,
-                downsample_strategy=args.downsample_strategy,
-                use_md=args.use_md,
-                use_cs=args.use_cs,
-                use_ref=bool(args.fa),
-                fa_path=args.fa,
-            )
-            tracks.append({"reads": reads, "title": titles[i]})
+            try:
+                reads = fetch_reads(
+                    bam_path,
+                    chrom,
+                    start,
+                    end,
+                    max_reads=args.max_reads,
+                    mapq_min=args.mapq,
+                    show_supp=args.show_supp,
+                    show_secondary=args.show_secondary,
+                    downsample_strategy=args.downsample_strategy,
+                    use_md=args.use_md,
+                    use_cs=args.use_cs,
+                    use_ref=bool(args.fa),
+                    fa_path=args.fa,
+                )
+            except Exception as e:
+                print(f"Error: Failed to read BAM file '{bam_path}': {e}", file=sys.stderr)
+                sys.exit(1)
+            
+            if not reads:
+                empty_bams.append((bam_path, titles[i]))
+            else:
+                tracks.append({"reads": reads, "title": titles[i]})
+        
+        # Check if all BAM/CRAM files have no reads
+        if not tracks:
+            print("Error: No reads found in the specified region.", file=sys.stderr)
+            print(f"\nRegion: {chrom}:{start}-{end}", file=sys.stderr)
+            print(f"\nBAM/CRAM file(s) checked:", file=sys.stderr)
+            for bam_path, title in empty_bams:
+                print(f"  - {bam_path} ({title})", file=sys.stderr)
+            print(f"\nPossible reasons:", file=sys.stderr)
+            print(f"  1. The region has no aligned reads", file=sys.stderr)
+            print(f"  2. MAPQ filter too strict (current: --mapq {args.mapq})", file=sys.stderr)
+            if not args.show_supp:
+                print(f"  3. Supplementary alignments are hidden (use --show-supp to include)", file=sys.stderr)
+            if not args.show_secondary:
+                print(f"  4. Secondary alignments are hidden (use --show-secondary to include)", file=sys.stderr)
+            print(f"  5. Chromosome name mismatch (check if '{chrom}' exists in BAM/CRAM file)", file=sys.stderr)
+            sys.exit(1)
+        
+        # Warn if some BAM/CRAM files have no reads
+        if empty_bams:
+            print("Warning: Some BAM/CRAM files have no reads in the specified region:", file=sys.stderr)
+            for bam_path, title in empty_bams:
+                print(f"  - {bam_path} ({title})", file=sys.stderr)
+            print("", file=sys.stderr)
             
         ref_seq = None
         if args.fa:
@@ -216,23 +262,82 @@ def main():
         from .reader import fetch_rna_reads
         from .ref import get_ref_subseq
         
+        # Check if BAM/CRAM files exist
+        missing_bams = []
+        for bam_path in args.bam:
+            if not os.path.exists(bam_path):
+                missing_bams.append(bam_path)
+        
+        if missing_bams:
+            print("Error: BAM/CRAM file(s) not found:", file=sys.stderr)
+            for bam_path in missing_bams:
+                print(f"  - {bam_path}", file=sys.stderr)
+            sys.exit(1)
+        
+        # Check if CRAM files have reference genome
+        cram_files = [bam_path for bam_path in args.bam if bam_path.lower().endswith('.cram')]
+        if cram_files and not args.fa:
+            print("Warning: CRAM file(s) detected but no reference genome provided (--fa).", file=sys.stderr)
+            print("  pysam will attempt to find the reference from:", file=sys.stderr)
+            print("  1. CRAM file header (UR tag)", file=sys.stderr)
+            print("  2. REF_PATH or REF_CACHE environment variables", file=sys.stderr)
+            print("  If this fails, please provide --fa with the reference FASTA file.", file=sys.stderr)
+            print("", file=sys.stderr)
+        
+        empty_bams = []
         for i, bam_path in enumerate(args.bam):
-            reads = fetch_rna_reads(
-                bam_path,
-                chrom,
-                start,
-                end,
-                max_reads=args.max_reads,
-                mapq_min=args.mapq,
-                show_supp=args.show_supp,
-                show_secondary=args.show_secondary,
-                downsample_strategy=args.downsample_strategy,
-                use_md=args.use_md,
-                use_cs=args.use_cs,
-                use_ref=bool(args.fa),
-                fa_path=args.fa,
-            )
-            tracks.append({"reads": reads, "title": titles[i]})
+            try:
+                reads = fetch_rna_reads(
+                    bam_path,
+                    chrom,
+                    start,
+                    end,
+                    max_reads=args.max_reads,
+                    mapq_min=args.mapq,
+                    show_supp=args.show_supp,
+                    show_secondary=args.show_secondary,
+                    downsample_strategy=args.downsample_strategy,
+                    use_md=args.use_md,
+                    use_cs=args.use_cs,
+                    use_ref=bool(args.fa),
+                    fa_path=args.fa,
+                )
+            except Exception as e:
+                file_type = "CRAM" if bam_path.lower().endswith('.cram') else "BAM"
+                print(f"Error: Failed to read {file_type} file '{bam_path}': {e}", file=sys.stderr)
+                if bam_path.lower().endswith('.cram') and not args.fa:
+                    print("  Hint: CRAM files require a reference genome. Try providing --fa <reference.fasta>", file=sys.stderr)
+                sys.exit(1)
+            
+            if not reads:
+                empty_bams.append((bam_path, titles[i]))
+            else:
+                tracks.append({"reads": reads, "title": titles[i]})
+        
+        # Check if all BAM/CRAM files have no reads
+        if not tracks:
+            print("Error: No reads found in the specified region.", file=sys.stderr)
+            print(f"\nRegion: {chrom}:{start}-{end}", file=sys.stderr)
+            print(f"\nBAM/CRAM file(s) checked:", file=sys.stderr)
+            for bam_path, title in empty_bams:
+                print(f"  - {bam_path} ({title})", file=sys.stderr)
+            print(f"\nPossible reasons:", file=sys.stderr)
+            print(f"  1. The region has no aligned reads", file=sys.stderr)
+            print(f"  2. MAPQ filter too strict (current: --mapq {args.mapq})", file=sys.stderr)
+            if not args.show_supp:
+                print(f"  3. Supplementary alignments are hidden (use --show-supp to include)", file=sys.stderr)
+            if not args.show_secondary:
+                print(f"  4. Secondary alignments are hidden (use --show-secondary to include)", file=sys.stderr)
+            print(f"  5. Chromosome name mismatch (check if '{chrom}' exists in BAM/CRAM file)", file=sys.stderr)
+            print(f"  6. For RNA mode, ensure spliced alignments are properly marked", file=sys.stderr)
+            sys.exit(1)
+        
+        # Warn if some BAM/CRAM files have no reads
+        if empty_bams:
+            print("Warning: Some BAM/CRAM files have no reads in the specified region:", file=sys.stderr)
+            for bam_path, title in empty_bams:
+                print(f"  - {bam_path} ({title})", file=sys.stderr)
+            print("", file=sys.stderr)
             
         ref_seq = None
         if args.fa:
