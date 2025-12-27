@@ -35,7 +35,7 @@ def render_snapshot(
     # Handle backward compatibility: if tracks is list of Read, wrap it
     if tracks and not isinstance(tracks[0], dict):
         tracks = [{'reads': tracks, 'title': track_title}]
-        
+
     # If using jbrowse style and coverage enabled, use new rendering function
     if style == "jbrowse" and show_coverage:
         return render_jbrowse_style(
@@ -58,7 +58,7 @@ def render_snapshot(
             gff_genes=gff_genes,
             bed_features=bed_features,
         )
-    
+
     # For default style, flatten reads from all tracks
     reads = []
     for t in tracks:
@@ -208,22 +208,22 @@ def calculate_base_distribution(
     reads: List[Read], start: int, end: int, ref_seq: Optional[str] = None
 ) -> List[Dict[str, int]]:
     """Calculate base distribution at each position (no aggregation, original resolution)
-    
+
     Returns base distribution at each position, including ref_match and variant base counts
     """
     # Calculate base distribution at each position
     pile = base_pileup(reads, start, end)
-    
+
     # Calculate ref_match and variant bases for each position
     result = []
     for i, p in enumerate(pile):
         ref_base = None
         if ref_seq and i < len(ref_seq):
             ref_base = ref_seq[i].upper()
-        
+
         ref_match = 0
         variant_counts = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
-        
+
         for base in ["A", "C", "G", "T", "N"]:
             count = p.get(base, 0)
             if count > 0:
@@ -231,7 +231,7 @@ def calculate_base_distribution(
                     ref_match += count
                 else:
                     variant_counts[base] += count
-        
+
         result.append({
             "ref_match": ref_match,
             "A": variant_counts["A"],
@@ -241,7 +241,7 @@ def calculate_base_distribution(
             "N": variant_counts["N"],
             "depth": p.get("depth", 0)
         })
-    
+
     return result
 
 
@@ -286,26 +286,26 @@ def draw_coverage_track(
     detail: str = "mid",
 ) -> int:
     """Draw coverage stacked bar chart, showing variants based on reference (JBrowse style)
-    
+
     base_distribution is distribution at each base position (original resolution)
     Drawing maps pixel positions to base positions
     - First draw variant bases (A→C→G→T→N)
     - Finally draw reference base (gray)
     """
     from .styles import MISMATCH_COLORS  # Use same colors as read mismatch
-    
+
     if not base_distribution:
         return height
-    
+
     num_bases = len(base_distribution)  # Number of base positions
-    
+
     # Calculate maximum depth
     max_cov = max_depth
     if max_cov is None:
         max_cov = max((b["depth"] for b in base_distribution), default=1)
     if max_cov <= 0:
         max_cov = 1
-    
+
     # Draw y-axis scale
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 8)
@@ -314,28 +314,28 @@ def draw_coverage_track(
             font = ImageFont.truetype("arial.ttf", 8)
         except:
             font = ImageFont.load_default()
-    
+
     # Draw y-axis line (within left margin)
     axis_x = margin - 2
     bar_bottom = y + height
     bar_top = y
     dr.line([(axis_x, bar_top), (axis_x, bar_bottom)], fill=(100, 100, 100), width=1)
-    
+
     # Draw ticks (0, middle, maximum)
     # Maximum tick (top)
     dr.line([(axis_x - 3, bar_top), (axis_x, bar_top)], fill=(100, 100, 100), width=1)
     dr.text((2, bar_top - 2), str(max_cov), fill=(80, 80, 80), font=font)
-    
+
     # Middle tick
     mid_y = (bar_top + bar_bottom) // 2
     mid_val = max_cov // 2
     dr.line([(axis_x - 3, mid_y), (axis_x, mid_y)], fill=(100, 100, 100), width=1)
     dr.text((2, mid_y - 4), str(mid_val), fill=(80, 80, 80), font=font)
-    
+
     # Bottom tick (0)
     dr.line([(axis_x - 3, bar_bottom), (axis_x, bar_bottom)], fill=(100, 100, 100), width=1)
     dr.text((2, bar_bottom - 8), "0", fill=(80, 80, 80), font=font)
-    
+
     # Draw by pixel position, each pixel aggregates all base positions it covers
     import math
     for px in range(width):
@@ -346,19 +346,19 @@ def draw_coverage_track(
             base_end_idx = base_start_idx + 1
         if base_end_idx > num_bases:
             base_end_idx = num_bases
-        
+
         # Aggregate all base positions in this range
         agg_ref_match = 0
         agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
         agg_depth = 0
-        
+
         for base_idx in range(base_start_idx, base_end_idx):
             dist = base_distribution[base_idx]
             agg_ref_match += dist.get("ref_match", 0)
             for base in ["A", "C", "G", "T", "N"]:
                 agg_variants[base] += dist.get(base, 0)
             agg_depth += dist.get("depth", 0)
-        
+
         # Average over the number of positions (but use ceil for variants to preserve rare variants)
         num_positions = base_end_idx - base_start_idx
         if num_positions > 1:
@@ -368,31 +368,31 @@ def draw_coverage_track(
                     # Use ceil to ensure variants are not lost
                     agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
             agg_depth = round(agg_depth / num_positions)
-        
+
         if agg_depth == 0:
             continue
-        
+
         # Actual drawing position (add margin)
         draw_x = margin + px
-        
+
         # Calculate total bar height for this position (proportional to depth)
         bar_height = int(height * min(agg_depth / max_cov, 1.0))
         if bar_height <= 0:
             continue
-        
+
         # Calculate height for each part
         base_heights = {}
         total_count = agg_ref_match
         for base in ["A", "C", "G", "T", "N"]:
             total_count += agg_variants[base]
-        
+
         if total_count == 0:
             continue
-        
+
         # Reference match portion
         if agg_ref_match > 0:
             base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
-        
+
         # Variant portion - ensure at least 1 pixel height if variant exists
         for base in ["A", "C", "G", "T", "N"]:
             count = agg_variants[base]
@@ -400,7 +400,7 @@ def draw_coverage_track(
                 h = int(bar_height * count / total_count)
                 # Ensure at least 1 pixel for visible variants
                 base_heights[base] = max(1, h) if h == 0 else h
-        
+
         # Adjust heights to ensure full fill
         total_height_used = sum(base_heights.values())
         if total_height_used < bar_height and base_heights:
@@ -411,11 +411,11 @@ def draw_coverage_track(
             excess = total_height_used - bar_height
             if "ref" in base_heights and base_heights["ref"] > excess:
                 base_heights["ref"] -= excess
-        
+
         # Draw coverage bar (same for RNA and DNA mode)
         bar_bottom = y + height
         current_y = bar_bottom
-        
+
         # If detail is low, just draw a simple gray depth bar
         if detail == "low":
             dr.rectangle([(draw_x, bar_bottom - bar_height), (draw_x + 1, bar_bottom)], fill=(180, 180, 180))
@@ -429,12 +429,12 @@ def draw_coverage_track(
             color = MISMATCH_COLORS.get(base, (160, 160, 160))
             dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=color)
             current_y -= h
-        
+
         # Finally draw reference match portion (gray, on top)
         if "ref" in base_heights and base_heights["ref"] > 0:
             h = base_heights["ref"]
             dr.rectangle([(draw_x, current_y - h), (draw_x + 1, current_y)], fill=(180, 180, 180))
-    
+
     return height
 
 
@@ -452,7 +452,7 @@ def draw_gene_track(
     """Draw gene annotation track"""
     header_h = draw_track_header(dr, "Gene Annotation", y, width + 2 * margin, 15)
     current_y = y + header_h + 5
-    
+
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
     except:
@@ -464,13 +464,13 @@ def draw_gene_track(
     for i, gene in enumerate(genes):
         stack = stacks[i]
         gene_y = current_y + stack * 20
-        
+
         gx0 = margin + int((max(gene.start, start) - start) / bp_per_px)
         gx1 = margin + int((min(gene.end, end) - start) / bp_per_px)
-        
+
         if gx1 <= gx0:
             continue
-            
+
         # Colors for gene features
         color_utr = (100, 149, 237)  # Cornflower Blue
         color_cds = (200, 160, 50)   # Brownish Yellow
@@ -479,7 +479,7 @@ def draw_gene_track(
 
         # Draw gene line (intron)
         dr.line([(gx0, mid_y), (gx1, mid_y)], fill=(0, 0, 0), width=1)
-        
+
         # Strand arrow - solid black arrow outside the feature with connecting line
         head_size = 6
         arrow_width = 4
@@ -513,14 +513,14 @@ def draw_gene_track(
             ex1 = margin + int((min(exon.end, end) - start) / bp_per_px)
             if ex1 > ex0:
                 dr.rectangle([(ex0, mid_y - feature_height // 2), (ex1, mid_y + feature_height // 2)], fill=color_utr)
-        
+
         # Draw CDS (CDS color, same height)
         for cds in gene.cds:
             cx0 = margin + int((max(cds.start, start) - start) / bp_per_px)
             cx1 = margin + int((min(cds.end, end) - start) / bp_per_px)
             if cx1 > cx0:
                 dr.rectangle([(cx0, mid_y - feature_height // 2), (cx1, mid_y + feature_height // 2)], fill=color_cds)
-                
+
         # Draw gene name
         dr.text((gx0, mid_y + 6), gene.name, fill=(0, 0, 0), font=font)
 
@@ -542,7 +542,7 @@ def draw_bed_track(
     """Draw BED annotation track"""
     header_h = draw_track_header(dr, "BED Annotation", y, width + 2 * margin, 15)
     current_y = y + header_h + 5
-    
+
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
     except:
@@ -555,28 +555,28 @@ def draw_bed_track(
         stack = stacks[i]
         feat_y = current_y + stack * 20
         mid_y = feat_y + 5
-        
+
         fx0 = margin + int((max(feat.start, start) - start) / bp_per_px)
         fx1 = margin + int((min(feat.end, end) - start) / bp_per_px)
-        
+
         if fx1 <= fx0:
             continue
-        
+
         # Default colors
         default_color = (100, 149, 237)  # Cornflower Blue
         thick_color = (200, 160, 50)      # Brownish Yellow
-        
+
         # Use itemRgb if available
         if feat.item_rgb:
             color = feat.item_rgb
         else:
             color = default_color
-        
+
         feature_height = 10
-        
+
         # Draw main feature rectangle
         dr.rectangle([(fx0, mid_y - feature_height // 2), (fx1, mid_y + feature_height // 2)], fill=color, outline=(0, 0, 0))
-        
+
         # Draw thickStart/thickEnd if specified (CDS-like region)
         if feat.thick_start is not None and feat.thick_end is not None:
             thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
@@ -584,7 +584,7 @@ def draw_bed_track(
             if thick_x1 > thick_x0:
                 thick_color_rgb = feat.item_rgb if feat.item_rgb else thick_color
                 dr.rectangle([(thick_x0, mid_y - feature_height // 2), (thick_x1, mid_y + feature_height // 2)], fill=thick_color_rgb, outline=(0, 0, 0))
-        
+
         # Draw blocks (exons) if available
         if feat.blocks:
             for block in feat.blocks:
@@ -592,7 +592,7 @@ def draw_bed_track(
                 bx1 = margin + int((min(block.end, end) - start) / bp_per_px)
                 if bx1 > bx0:
                     dr.rectangle([(bx0, mid_y - feature_height // 2), (bx1, mid_y + feature_height // 2)], fill=color, outline=(0, 0, 0))
-            
+
             # Draw intron lines between blocks
             if len(feat.blocks) > 1:
                 sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
@@ -607,7 +607,7 @@ def draw_bed_track(
         else:
             # If no blocks, draw intron line for the whole feature
             dr.line([(fx0, mid_y), (fx1, mid_y)], fill=(0, 0, 0), width=1)
-        
+
         # Strand arrow - solid black arrow outside the feature with connecting line
         head_size = 6
         arrow_width = 4
@@ -634,7 +634,7 @@ def draw_bed_track(
                 (arrow_x - head_size, mid_y),
                 (arrow_x, mid_y + arrow_width)
             ], fill=(0, 0, 0), outline=(0, 0, 0))
-        
+
         # Feature name
         if feat.name:
             dr.text((fx0, mid_y + 6), feat.name, fill=(0, 0, 0), font=font)
@@ -688,14 +688,14 @@ def render_jbrowse_style(
         top += 20  # Axis area (reduced)
 
     total_height = top
-    
+
     # Calculate aggregate coverage height if enabled
     aggregate_coverage_h = 0
     if show_coverage:
         # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
-    
+
     # Calculate annotation track height if enabled
     annotation_track_h = 0
     gene_stacks = []
@@ -718,21 +718,21 @@ def render_jbrowse_style(
     # Calculate height for each track
     for i, track in enumerate(tracks):
         stacks = track_stacks[i]
-        
+
         # Read track (reduced spacing, total height halved)
         track_header_height = 15  # Reduced header height
         reads_area_height = (max(stacks) + 1) * (read_height + 1) + 5  # Reduced read spacing
-        
+
         total_height += track_header_height + reads_area_height + 5
-    
+
     img = Image.new("RGB", (width, total_height), (255, 255, 255))
     dr = ImageDraw.Draw(img)
-    
+
     current_y = 0
-    
+
     # Collect tick positions for drawing guide lines
     tick_positions = []
-    
+
     # Draw coordinate axis
     if show_axis:
         # Axis line position adjusted to bottom
@@ -756,55 +756,55 @@ def render_jbrowse_style(
             pos_str = f"{pos:,}"
             dr.text((x + 2, current_y + 2), pos_str, fill=(0, 0, 0), font=font)
         current_y += 22
-    
+
     # Draw vertical guide lines (dashed) - from axis to bottom of image
     for tick_x in tick_positions:
         # Draw dashed line: draw 2px line every 4 pixels
         for dash_y in range(current_y, total_height, 6):
             dash_end = min(dash_y + 3, total_height)
             dr.line([(tick_x, dash_y), (tick_x, dash_end)], fill=(220, 220, 220), width=1)
-    
+
     # Draw aggregate coverage track if enabled
     if show_coverage:
         all_reads = []
         for track in tracks:
             all_reads.extend(track['reads'])
-            
+
         current_y += draw_track_header(dr, "Aggregate Coverage", current_y, width, coverage_height)
-        
+
         # Add padding for arcs
         padding_for_arcs = coverage_height
         current_y += padding_for_arcs
-        
+
         # Calculate base distribution for all reads
         base_distribution = calculate_base_distribution(all_reads, start, end, ref_seq)
         draw_coverage_track(
-            dr, 
-            base_distribution, 
-            current_y, 
-            content_width, 
-            coverage_height, 
-            start, 
-            end, 
-            ref_seq, 
+            dr,
+            base_distribution,
+            current_y,
+            content_width,
+            coverage_height,
+            start,
+            end,
+            ref_seq,
             coverage_max_depth,
             margin,
             is_rna,
             detail
         )
-        
+
         # Draw pink connection lines in coverage track for RNA mode
         if is_rna:
             # Create a transparent overlay for arcs
             arc_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
             dr_arc = ImageDraw.Draw(arc_layer)
-            
+
             # Calculate coverage track Y position
             coverage_track_bottom = current_y + coverage_height
-            
+
             # Pink color for arcs: (253, 209, 211)
             arc_color = (253, 209, 211, 150)
-            
+
             # Anchor y position: 1/2 of coverage height
             arc_anchor_y = coverage_track_bottom - coverage_height // 2
 
@@ -815,29 +815,29 @@ def render_jbrowse_style(
                     if seg.type == "ref_skip":
                         seg_start = ref_cursor
                         seg_end = ref_cursor + seg.ref_consumed
-                        
+
                         xa = margin + int((seg_start - start) / bp_per_px)
                         xb = margin + int((seg_end - start) / bp_per_px)
                         xa = max(margin, min(width - margin - 1, xa))
                         xb = max(margin, min(width - margin - 1, xb))
-                        
+
                         if xb - xa < 2:
                             ref_cursor += seg.ref_consumed
                             continue
-                            
+
                         # Draw arc
                         w = xb - xa
                         h = min(w // 2, coverage_height)
                         bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
                         dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
-                        
+
                     ref_cursor += seg.ref_consumed
 
             # 2. Draw arcs for split reads
             groups_temp: Dict[str, List[int]] = {}
             for idx_r, r in enumerate(all_reads):
                 groups_temp.setdefault(r.qname, []).append(idx_r)
-            
+
             for qname, idxs in groups_temp.items():
                 if len(idxs) > 1:
                     # Sort segments by genomic position
@@ -848,21 +848,21 @@ def render_jbrowse_style(
                             xb = margin + int((all_reads[b].start - start) / bp_per_px)
                             xa = max(margin, min(width - margin - 1, xa))
                             xb = max(margin, min(width - margin - 1, xb))
-                            
+
                             if xb - xa < 2:
                                 continue
-                                
+
                             w = xb - xa
                             h = min(w // 2, coverage_height)
                             bbox = [xa, arc_anchor_y - h, xb, arc_anchor_y + h]
                             dr_arc.arc(bbox, start=180, end=0, fill=arc_color, width=1)
-            
+
             # Composite arc layer
             img = img.convert("RGBA")
             img = Image.alpha_composite(img, arc_layer)
             img = img.convert("RGB")
             dr = ImageDraw.Draw(img)
-        
+
         current_y += coverage_height + 15  # Padding after coverage
 
     # Draw annotation track if enabled
@@ -896,22 +896,22 @@ def render_jbrowse_style(
         reads = track['reads']
         current_track_title = track.get('title', track_title)
         stacks = track_stacks[i]
-        
+
         # Read track header
         reads_area_height = (max(stacks) + 1) * (read_height + 1) + 5
         current_y += draw_track_header(dr, current_track_title, current_y, width, reads_area_height)
-        
+
         # Draw reads
         # (Rest of the read drawing logic remains same)
         reads_start_y = current_y
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
             groups.setdefault(r.qname, []).append(idx_r)
-        
+
         for idx, r in enumerate(reads):
             y = reads_start_y + stacks[idx] * (read_height + 1)
             rects = segments_to_pixels(r.segments, r.start, start, bp_per_px, detail=detail)
-            
+
             # Create rect index to segment mapping, for getting insertion length
             rect_to_seg = {}
             ref_cursor = r.start
@@ -928,24 +928,24 @@ def render_jbrowse_style(
                     rect_to_seg[rect_idx] = seg_idx
                     rect_idx += 1
                 ref_cursor += seg.ref_consumed
-            
+
             for rect_idx, (t, x0, x1) in enumerate(rects):
                 # Add margin offset
                 x0_draw = margin + x0
                 x1_draw = margin + x1
-                
+
                 # For insertion, check if original position is within visible area
                 if t == "ins":
                     if x0 < 0 or x0 > (width - 2 * margin):
                         continue
-                
+
                 # Limit to visible area
                 x0_draw = max(margin, min(width - margin, x0_draw))
                 x1_draw = max(margin, min(width - margin, x1_draw))
-                
+
                 if x1_draw <= x0_draw and t != "ins":
                     continue
-                
+
                 if color_by == "type":
                     color = color_for_type(t)
                 elif color_by == "mapq":
@@ -953,7 +953,7 @@ def render_jbrowse_style(
                     color = shade_by_mapq(base_color, r.mapq)
                 else:
                     color = color_for_type(t)
-                
+
                 if t == "ins":
                     ins_color = (128, 0, 128)  # Purple
                     dr.line([(x0_draw, y), (x0_draw, y + read_height)], fill=ins_color, width=1)
@@ -1008,7 +1008,7 @@ def render_jbrowse_style(
                     if t == "match":
                         color = (195, 195, 195)
                     dr.rectangle([(x0_draw, y), (x1_draw, y + read_height)], fill=color)
-            
+
             # Read direction arrow
             if style == "jbrowse" and rects:
                 read_end_px = margin + int((min(r.end, end) - start) / bp_per_px)
@@ -1018,7 +1018,7 @@ def render_jbrowse_style(
                 head = max(3, min(read_height // 2, 5))
                 arrow_fill = (211, 211, 211)
                 arrow_truncated = (200, 200, 200)
-                
+
                 if r.reverse:
                     arrow_x = read_start_px
                     is_truncated = r.start < start
@@ -1035,7 +1035,7 @@ def render_jbrowse_style(
                         dr.polygon(points, outline=arrow_truncated, fill=(255, 255, 255))
                     else:
                         dr.polygon(points, fill=arrow_fill)
-        
+
         # Connection lines
         if is_rna:
             for qname, idxs in groups.items():
@@ -1064,5 +1064,5 @@ def render_jbrowse_style(
                         dr.line([(xa, ya_center), (xb, yb_center)], fill=(80, 160, 80), width=1)
 
         current_y = reads_start_y + reads_area_height + 5
-    
+
     return img

@@ -19,7 +19,7 @@ echo ""
 
 
 # SVG
-echo "1. 生成 SVG 格式..."
+echo "1. single pos, output SVG"
 bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:1-10000" \
@@ -38,7 +38,7 @@ else
 fi
 
 # PDF
-echo "2. 生成 PDF 格式..."
+echo "2. single pos, output PDF"
 bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
@@ -56,6 +56,29 @@ if [ $? -eq 0 ]; then
 else
     echo "✗ PDF output failed"
 fi
+
+region.bed
+
+# PDF
+echo "2.1, multiple pos, output PDF"
+bin/bamsnap-lrs dna \
+    --bam "$BAM" \
+    --regions example/region.bed \
+	--out-prefix example/batch \
+    --fa "$FASTA" \
+	--bed example/chrM.annot.bed \
+    --show-axis \
+    --show-coverage \
+    --track-title "Test Reads - PDF" \
+    --width 1500 \
+	--detail high
+
+if [ $? -eq 0 ]; then
+    echo "✓ PDF output success: example/batch_*"
+else
+    echo "✗ PDF output failed"
+fi
+
 
 <<EOF
 # PDF

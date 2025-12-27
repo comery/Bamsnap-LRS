@@ -1,2 +1,5 @@
 # env
 venv/
+
+#mac
+.DS_Store

@@ -6,8 +6,15 @@ import sys
 def add_common_args(parser):
     """Add common arguments to both dna and rna parsers"""
     parser.add_argument("--bam", required=True, nargs='+', action='extend', help="BAM/CRAM file path(s)")
-    parser.add_argument("--pos", required=True, help="Genomic position, format: chr:start-end or chr:pos")
-    parser.add_argument("--out", required=True, help="Output file path (supports .png, .svg, .pdf)")
+    
+    # Position input: either --pos (single region) or --regions (batch mode)
+    position_group = parser.add_mutually_exclusive_group(required=True)
+    position_group.add_argument("--pos", help="Genomic position, format: chr:start-end or chr:pos")
+    position_group.add_argument("--regions", help="BED or VCF file containing regions to process (batch mode). VCF files support structural variants with END tag.")
+    
+    parser.add_argument("--out", help="Output file path (supports .png, .svg, .pdf). Required for single region mode.")
+    parser.add_argument("--out-prefix", help="Output prefix for batch mode: outdir/outprefix_ (e.g., results/sample_.svg). Output files will be named: outprefix_chr_start_end.svg")
+    parser.add_argument("--vcf-padding", type=int, default=250, help="Padding around VCF variants (bp) when using --regions with VCF files, [250]")
     parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display, [300]")
     parser.add_argument("--mapq", type=int, default=0, help="Minimum MAPQ value, [0]")
     parser.add_argument("--show-supp", action="store_true", help="Show supplementary alignments")
@@ -45,7 +52,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_ge
         output_format = 'svg'
     elif args.out.lower().endswith('.pdf'):
         output_format = 'pdf'
-    
+
     if output_format == 'svg':
         from .svg_renderer import render_svg_snapshot
         svg_content = render_svg_snapshot(
@@ -80,7 +87,7 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_ge
             print("  or")
             print("  conda install -c conda-forge cairosvg")
             return
-        
+
         # First generate SVG content
         from .svg_renderer import render_svg_snapshot
         svg_content = render_svg_snapshot(
@@ -139,21 +146,116 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_ge
 def main():
     p = argparse.ArgumentParser(description="Bamsnap-LRS: Long-read sequencing data visualization tool")
     sub = p.add_subparsers(dest="cmd")
-    
+
     # dna command - generate genomic region snapshot for DNA data
     dna_parser = sub.add_parser("dna", help="Generate read pileup snapshot for DNA sequencing data")
     add_common_args(dna_parser)
-    
+
     # rna command - generate genomic region snapshot for RNA data
     rna_parser = sub.add_parser("rna", help="Generate read pileup snapshot for RNA sequencing data (handles spliced alignments)")
     add_common_args(rna_parser)
-    
+
     args = p.parse_args()
-    
+
     if args.cmd is None:
         p.print_help()
         return
-    
+
+    # Determine if batch mode or single region mode
+    is_batch_mode = args.regions is not None
+
+    if is_batch_mode:
+        # Batch mode: process multiple regions from file
+        if not args.out_prefix:
+            print("Error: --out-prefix is required when using --regions (batch mode)", file=sys.stderr)
+            sys.exit(1)
+
+        # Parse output prefix to extract directory and prefix
+        if '/' in args.out_prefix or '\\' in args.out_prefix:
+            out_dir = os.path.dirname(args.out_prefix)
+            out_prefix = os.path.basename(args.out_prefix)
+        else:
+            out_dir = '.'
+            out_prefix = args.out_prefix
+
+        # Ensure output directory exists
+        os.makedirs(out_dir, exist_ok=True)
+
+        # Parse regions file
+        from .regions import parse_regions_file
+        try:
+            # Use vcf_padding parameter if provided
+            vcf_padding = getattr(args, 'vcf_padding', 250)
+            regions = parse_regions_file(args.regions, vcf_padding=vcf_padding)
+        except Exception as e:
+            print(f"Error: Failed to parse regions file '{args.regions}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if not regions:
+            print("Warning: No regions found in file", file=sys.stderr)
+            return
+
+        print(f"Processing {len(regions)} regions...", file=sys.stderr)
+
+        # Determine output format from prefix (or default to svg)
+        output_ext = 'svg'  # Default
+        if args.out_prefix.lower().endswith('.png'):
+            output_ext = 'png'
+        elif args.out_prefix.lower().endswith('.pdf'):
+            output_ext = 'pdf'
+        elif args.out_prefix.lower().endswith('.svg'):
+            output_ext = 'svg'
+
+        # Remove extension from prefix if present
+        prefix_base = out_prefix
+        for ext in ['.png', '.pdf', '.svg']:
+            if prefix_base.lower().endswith(ext):
+                prefix_base = prefix_base[:-len(ext)]
+                break
+
+        # Process each region
+        success_count = 0
+        failed_regions = []
+
+        for idx, (chrom, start, end) in enumerate(regions, 1):
+            print(f"[{idx}/{len(regions)}] Processing {chrom}:{start}-{end}...", file=sys.stderr)
+
+            # Generate output filename: outprefix_chr_start_end.ext
+            output_filename = f"{prefix_base}_{chrom}_{start}_{end}.{output_ext}"
+            output_path = os.path.join(out_dir, output_filename)
+
+            # Create a modified args object for this region
+            region_args = argparse.Namespace(**vars(args))
+            region_args.out = output_path
+            region_args.pos = f"{chrom}:{start}-{end}"
+
+            # Process this region (catch errors to continue processing)
+            try:
+                process_single_region(region_args, chrom, start, end)
+                success_count += 1
+                print(f"  ✓ Saved to {output_path}", file=sys.stderr)
+            except (SystemExit, ValueError) as e:
+                # If process_single_region exits due to no reads, continue
+                error_msg = str(e) if e else "No reads found"
+                failed_regions.append((chrom, start, end, error_msg))
+                print(f"  ✗ Skipped: {error_msg}", file=sys.stderr)
+            except Exception as e:
+                failed_regions.append((chrom, start, end, str(e)))
+                print(f"  ✗ Error: {e}", file=sys.stderr)
+
+        print(f"\nCompleted processing {len(regions)} regions.", file=sys.stderr)
+        print(f"  Successfully processed: {success_count}", file=sys.stderr)
+        if failed_regions:
+            print(f"  Failed/Skipped: {len(failed_regions)}", file=sys.stderr)
+            for chrom, start, end, reason in failed_regions:
+                print(f"    - {chrom}:{start}-{end}: {reason}", file=sys.stderr)
+        return
+
+    # Single region mode
+    if not args.out:
+        print("Error: --out is required when using --pos (single region mode)", file=sys.stderr)
+        sys.exit(1)
+
     # Parse position
     chrom, coords = args.pos.split(":")
     if "-" in coords:
@@ -164,7 +266,13 @@ def main():
         pos = int(coords)
         start = max(0, pos - 250)
         end = pos + 250
-    
+
+    process_single_region(args, chrom, start, end)
+
+
+def process_single_region(args, chrom, start, end):
+    """Process a single genomic region"""
+
     # Fetch annotation data if provided
     gff_genes = None
     bed_features = None
@@ -189,19 +297,19 @@ def main():
     if args.cmd == "dna":
         from .reader import fetch_reads
         from .ref import get_ref_subseq
-        
+
         # Check if BAM files exist
         missing_bams = []
         for bam_path in args.bam:
             if not os.path.exists(bam_path):
                 missing_bams.append(bam_path)
-        
+
         if missing_bams:
             print("Error: BAM file(s) not found:", file=sys.stderr)
             for bam_path in missing_bams:
                 print(f"  - {bam_path}", file=sys.stderr)
             sys.exit(1)
-        
+
         empty_bams = []
         for i, bam_path in enumerate(args.bam):
             try:
@@ -223,57 +331,63 @@ def main():
             except Exception as e:
                 print(f"Error: Failed to read BAM file '{bam_path}': {e}", file=sys.stderr)
                 sys.exit(1)
-            
+
             if not reads:
                 empty_bams.append((bam_path, titles[i]))
             else:
                 tracks.append({"reads": reads, "title": titles[i]})
-        
+
         # Check if all BAM/CRAM files have no reads
         if not tracks:
-            print("Error: No reads found in the specified region.", file=sys.stderr)
-            print(f"\nRegion: {chrom}:{start}-{end}", file=sys.stderr)
-            print(f"\nBAM/CRAM file(s) checked:", file=sys.stderr)
-            for bam_path, title in empty_bams:
-                print(f"  - {bam_path} ({title})", file=sys.stderr)
-            print(f"\nPossible reasons:", file=sys.stderr)
-            print(f"  1. The region has no aligned reads", file=sys.stderr)
-            print(f"  2. MAPQ filter too strict (current: --mapq {args.mapq})", file=sys.stderr)
-            if not args.show_supp:
-                print(f"  3. Supplementary alignments are hidden (use --show-supp to include)", file=sys.stderr)
-            if not args.show_secondary:
-                print(f"  4. Secondary alignments are hidden (use --show-secondary to include)", file=sys.stderr)
-            print(f"  5. Chromosome name mismatch (check if '{chrom}' exists in BAM/CRAM file)", file=sys.stderr)
-            sys.exit(1)
-        
+            # In batch mode, raise exception to be caught by caller; in single mode, exit with error
+            if hasattr(args, 'regions') and args.regions:
+                # Batch mode: raise exception to be caught by caller
+                raise ValueError(f"No reads found in region {chrom}:{start}-{end}")
+            else:
+                # Single mode: print error and exit
+                print("Error: No reads found in the specified region.", file=sys.stderr)
+                print(f"\nRegion: {chrom}:{start}-{end}", file=sys.stderr)
+                print(f"\nBAM/CRAM file(s) checked:", file=sys.stderr)
+                for bam_path, title in empty_bams:
+                    print(f"  - {bam_path} ({title})", file=sys.stderr)
+                print(f"\nPossible reasons:", file=sys.stderr)
+                print(f"  1. The region has no aligned reads", file=sys.stderr)
+                print(f"  2. MAPQ filter too strict (current: --mapq {args.mapq})", file=sys.stderr)
+                if not args.show_supp:
+                    print(f"  3. Supplementary alignments are hidden (use --show-supp to include)", file=sys.stderr)
+                if not args.show_secondary:
+                    print(f"  4. Secondary alignments are hidden (use --show-secondary to include)", file=sys.stderr)
+                print(f"  5. Chromosome name mismatch (check if '{chrom}' exists in BAM/CRAM file)", file=sys.stderr)
+                sys.exit(1)
+
         # Warn if some BAM/CRAM files have no reads
         if empty_bams:
             print("Warning: Some BAM/CRAM files have no reads in the specified region:", file=sys.stderr)
             for bam_path, title in empty_bams:
                 print(f"  - {bam_path} ({title})", file=sys.stderr)
             print("", file=sys.stderr)
-            
+
         ref_seq = None
         if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)
         render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_genes=gff_genes, bed_features=bed_features)
-    
+
     elif args.cmd == "rna":
         from .reader import fetch_rna_reads
         from .ref import get_ref_subseq
-        
+
         # Check if BAM/CRAM files exist
         missing_bams = []
         for bam_path in args.bam:
             if not os.path.exists(bam_path):
                 missing_bams.append(bam_path)
-        
+
         if missing_bams:
             print("Error: BAM/CRAM file(s) not found:", file=sys.stderr)
             for bam_path in missing_bams:
                 print(f"  - {bam_path}", file=sys.stderr)
             sys.exit(1)
-        
+
         # Check if CRAM files have reference genome
         cram_files = [bam_path for bam_path in args.bam if bam_path.lower().endswith('.cram')]
         if cram_files and not args.fa:
@@ -283,7 +397,7 @@ def main():
             print("  2. REF_PATH or REF_CACHE environment variables", file=sys.stderr)
             print("  If this fails, please provide --fa with the reference FASTA file.", file=sys.stderr)
             print("", file=sys.stderr)
-        
+
         empty_bams = []
         for i, bam_path in enumerate(args.bam):
             try:
@@ -308,12 +422,12 @@ def main():
                 if bam_path.lower().endswith('.cram') and not args.fa:
                     print("  Hint: CRAM files require a reference genome. Try providing --fa <reference.fasta>", file=sys.stderr)
                 sys.exit(1)
-            
+
             if not reads:
                 empty_bams.append((bam_path, titles[i]))
             else:
                 tracks.append({"reads": reads, "title": titles[i]})
-        
+
         # Check if all BAM/CRAM files have no reads
         if not tracks:
             print("Error: No reads found in the specified region.", file=sys.stderr)
@@ -331,14 +445,14 @@ def main():
             print(f"  5. Chromosome name mismatch (check if '{chrom}' exists in BAM/CRAM file)", file=sys.stderr)
             print(f"  6. For RNA mode, ensure spliced alignments are properly marked", file=sys.stderr)
             sys.exit(1)
-        
+
         # Warn if some BAM/CRAM files have no reads
         if empty_bams:
             print("Warning: Some BAM/CRAM files have no reads in the specified region:", file=sys.stderr)
             for bam_path, title in empty_bams:
                 print(f"  - {bam_path} ({title})", file=sys.stderr)
             print("", file=sys.stderr)
-            
+
         ref_seq = None
         if args.fa:
             ref_seq = get_ref_subseq(args.fa, chrom, start, end)

@@ -38,18 +38,18 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
     """Draw gene track in SVG"""
     header_h = draw_svg_track_header(svg, "Gene Annotation", y, width + 2 * margin)
     current_y = y + header_h + 5
-    
+
     for i, gene in enumerate(genes):
         stack = stacks[i]
         gene_y = current_y + stack * 20
         mid_y = gene_y + 5
-        
+
         gx0 = margin + int((max(gene.start, start) - start) / bp_per_px)
         gx1 = margin + int((min(gene.end, end) - start) / bp_per_px)
-        
+
         if gx1 <= gx0:
             continue
-            
+
         # Colors for gene features
         color_utr = "#6495ed"  # Cornflower Blue
         color_cds = "#c8a032"  # Brownish Yellow
@@ -61,7 +61,7 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
             "x2": str(gx1), "y2": str(mid_y),
             "stroke": "black", "stroke-width": "1"
         })
-        
+
         # Strand arrow - solid black arrow outside the feature with connecting line
         head_size = 6
         arrow_width = 4
@@ -105,7 +105,7 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
                     "width": str(ex1 - ex0), "height": str(feature_height),
                     "fill": color_utr
                 })
-        
+
         # CDS (CDS color, same height)
         for cds in gene.cds:
             cx0 = margin + int((max(cds.start, start) - start) / bp_per_px)
@@ -116,7 +116,7 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
                     "width": str(cx1 - cx0), "height": str(feature_height),
                     "fill": color_cds
                 })
-                
+
         # Gene name
         SubElement(svg, "text", {
             "x": str(gx0), "y": str(mid_y + 16),
@@ -131,37 +131,37 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
     """Draw BED track in SVG"""
     header_h = draw_svg_track_header(svg, "BED Annotation", y, width + 2 * margin)
     current_y = y + header_h + 5
-    
+
     for i, feat in enumerate(features):
         stack = stacks[i]
         feat_y = current_y + stack * 20
         mid_y = feat_y + 5
-        
+
         fx0 = margin + int((max(feat.start, start) - start) / bp_per_px)
         fx1 = margin + int((min(feat.end, end) - start) / bp_per_px)
-        
+
         if fx1 <= fx0:
             continue
-        
+
         # Default colors
         default_color = "#6495ed"  # Cornflower Blue
         thick_color = "#c8a032"    # Brownish Yellow
-        
+
         # Use itemRgb if available
         if feat.item_rgb:
             color_hex = rgb_to_hex(feat.item_rgb)
         else:
             color_hex = default_color
-        
+
         feature_height = 10
-        
+
         # Draw main feature rectangle
         SubElement(svg, "rect", {
             "x": str(fx0), "y": str(mid_y - feature_height / 2),
             "width": str(fx1 - fx0), "height": str(feature_height),
             "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
         })
-        
+
         # Draw thickStart/thickEnd if specified (CDS-like region)
         if feat.thick_start is not None and feat.thick_end is not None:
             thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
@@ -173,7 +173,7 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
                     "width": str(thick_x1 - thick_x0), "height": str(feature_height),
                     "fill": thick_color_hex, "stroke": "black", "stroke-width": "0.5"
                 })
-        
+
         # Draw blocks (exons) if available
         if feat.blocks:
             for block in feat.blocks:
@@ -185,7 +185,7 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
                         "width": str(bx1 - bx0), "height": str(feature_height),
                         "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
                     })
-            
+
             # Draw intron lines between blocks
             if len(feat.blocks) > 1:
                 sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
@@ -208,7 +208,7 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
                 "x2": str(fx1), "y2": str(mid_y),
                 "stroke": "black", "stroke-width": "1"
             })
-        
+
         # Strand arrow - solid black arrow outside the feature with connecting line
         head_size = 6
         arrow_width = 4
@@ -241,7 +241,7 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
                 "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x-head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
                 "fill": "black", "stroke": "black", "stroke-width": "0.5"
             })
-        
+
         # Feature name
         if feat.name:
             SubElement(svg, "text", {
@@ -279,24 +279,24 @@ def render_svg_snapshot(
     # Actual drawing area width (excluding left and right margins)
     content_width = width - 2 * margin
     bp_per_px = (end - start) / float(content_width)
-    
+
     # Calculate total height
     top = 0
     if show_axis:
         top += 22  # Axis area height
-    
+
     total_height = top
-    
+
     # Pre-calculate stacks and height for each track
     track_meta = []
-    
+
     # Calculate aggregate coverage height if needed
     aggregate_coverage_h = 0
     if show_coverage:
         # Header (15) + Padding for arcs (coverage_height) + Coverage track (coverage_height) + Bottom margin (15)
         aggregate_coverage_h = 15 + coverage_height + coverage_height + 15
         total_height += aggregate_coverage_h
-    
+
     # Calculate annotation track height if enabled
     annotation_track_h = 0
     gene_stacks = []
@@ -320,25 +320,25 @@ def render_svg_snapshot(
         reads = track['reads']
         spans = [(max(r.start, start), min(r.end, end)) for r in reads]
         stacks = assign_stacks(spans, max_stack=max(1, len(reads)))
-        
+
         track_header_h = 15
         reads_area_h = (max(stacks) + 1) * (read_height + 1) + 5
-        
+
         track_h = track_header_h + reads_area_h + 5
         total_height += track_h
-        
+
         track_meta.append({
             'stacks': stacks,
             'reads_area_h': reads_area_h
         })
-    
+
     # Create SVG root element
     svg = Element("svg", {
         "width": str(width),
         "height": str(total_height),
         "xmlns": "http://www.w3.org/2000/svg"
     })
-    
+
     # Background
     SubElement(svg, "rect", {
         "x": "0", "y": "0",
@@ -346,12 +346,12 @@ def render_svg_snapshot(
         "height": str(total_height),
         "fill": "white"
     })
-    
+
     current_y = 0
-    
+
     # Collect tick positions for drawing guide lines
     tick_positions = []
-    
+
     # Draw coordinate axis
     if show_axis:
         # Axis line position adjusted to bottom
@@ -383,7 +383,7 @@ def render_svg_snapshot(
             })
             text.text = f"{pos:,}"
         current_y += 22
-    
+
     # Draw vertical guide lines (dashed) - from axis to bottom of image
     for tick_x in tick_positions:
         SubElement(svg, "line", {
@@ -393,14 +393,14 @@ def render_svg_snapshot(
             "stroke-width": "1",
             "stroke-dasharray": "3,3"  # Dashed: 3px line, 3px gap
         })
-    
+
     # Draw aggregate coverage track if enabled
     if show_coverage:
         track_y_start = current_y
         all_reads = []
         for track in tracks:
             all_reads.extend(track['reads'])
-            
+
         # Header bar
         SubElement(svg, "rect", {
             "x": "0", "y": str(current_y),
@@ -422,25 +422,25 @@ def render_svg_snapshot(
         })
         header_text.text = "Aggregate Coverage"
         current_y += 15
-        
+
         # Padding for arcs
         padding_for_arcs = coverage_height
         current_y += padding_for_arcs
-        
+
         # Calculate base distribution for all reads
         pile = base_pileup(all_reads, start, end)
         num_bases = len(pile)
-        
+
         # Calculate ref_match and variant bases for each position
         base_distribution = []
         for i_base, p in enumerate(pile):
             ref_base = None
             if ref_seq and i_base < len(ref_seq):
                 ref_base = ref_seq[i_base].upper()
-            
+
             ref_match = 0
             variant_counts = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
-            
+
             for base in ["A", "C", "G", "T", "N"]:
                 count = p.get(base, 0)
                 if count > 0:
@@ -448,7 +448,7 @@ def render_svg_snapshot(
                         ref_match += count
                     else:
                         variant_counts[base] += count
-            
+
             base_distribution.append({
                 "ref_match": ref_match,
                 "A": variant_counts["A"],
@@ -458,19 +458,19 @@ def render_svg_snapshot(
                 "N": variant_counts["N"],
                 "depth": p.get("depth", 0)
             })
-        
+
         # Draw coverage stacked bar chart
         max_cov = coverage_max_depth
         if max_cov is None:
             max_cov = max((b["depth"] for b in base_distribution), default=1)
         if max_cov <= 0:
             max_cov = 1
-        
+
         # Draw y-axis scale
         bar_bottom = current_y + coverage_height
         bar_top = current_y
         axis_x = margin - 2
-        
+
         # Y-axis line
         SubElement(svg, "line", {
             "x1": str(axis_x), "y1": str(bar_top),
@@ -478,7 +478,7 @@ def render_svg_snapshot(
             "stroke": "#646464",
             "stroke-width": "1"
         })
-        
+
         # Maximum value tick (top)
         SubElement(svg, "line", {
             "x1": str(axis_x - 3), "y1": str(bar_top),
@@ -493,7 +493,7 @@ def render_svg_snapshot(
             "fill": "#505050"
         })
         max_text.text = str(max_cov)
-        
+
         # Middle tick
         mid_y = (bar_top + bar_bottom) // 2
         mid_val = max_cov // 2
@@ -510,7 +510,7 @@ def render_svg_snapshot(
             "fill": "#505050"
         })
         mid_text.text = str(mid_val)
-        
+
         # Bottom tick (0)
         SubElement(svg, "line", {
             "x1": str(axis_x - 3), "y1": str(bar_bottom),
@@ -525,7 +525,7 @@ def render_svg_snapshot(
             "fill": "#505050"
         })
         zero_text.text = "0"
-        
+
         # Draw by pixel position
         import math
         for px in range(content_width):
@@ -535,18 +535,18 @@ def render_svg_snapshot(
                 base_end_idx = base_start_idx + 1
             if base_end_idx > num_bases:
                 base_end_idx = num_bases
-            
+
             agg_ref_match = 0
             agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
             agg_depth = 0
-            
+
             for base_idx in range(base_start_idx, base_end_idx):
                 dist = base_distribution[base_idx]
                 agg_ref_match += dist.get("ref_match", 0)
                 for base in ["A", "C", "G", "T", "N"]:
                     agg_variants[base] += dist.get(base, 0)
                 agg_depth += dist.get("depth", 0)
-            
+
             num_positions = base_end_idx - base_start_idx
             if num_positions > 1:
                 agg_ref_match = round(agg_ref_match / num_positions)
@@ -554,32 +554,32 @@ def render_svg_snapshot(
                     if agg_variants[base] > 0:
                         agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
                 agg_depth = round(agg_depth / num_positions)
-            
+
             if agg_depth == 0:
                 continue
-            
+
             draw_x = margin + px
             bar_height = int(coverage_height * min(agg_depth / max_cov, 1.0))
             if bar_height <= 0:
                 continue
-            
+
             base_heights = {}
             total_count = agg_ref_match
             for base in ["A", "C", "G", "T", "N"]:
                 total_count += agg_variants[base]
-            
+
             if total_count == 0:
                 continue
-            
+
             if agg_ref_match > 0:
                 base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
-            
+
             for base in ["A", "C", "G", "T", "N"]:
                 count = agg_variants[base]
                 if count > 0:
                     h = int(bar_height * count / total_count)
                     base_heights[base] = max(1, h) if h == 0 else h
-            
+
             total_height_used = sum(base_heights.values())
             if total_height_used < bar_height and base_heights:
                 max_base = max(base_heights.items(), key=lambda x: x[1])[0]
@@ -588,9 +588,9 @@ def render_svg_snapshot(
                 excess = total_height_used - bar_height
                 if "ref" in base_heights and base_heights["ref"] > excess:
                     base_heights["ref"] -= excess
-            
+
             current_stack_y = bar_bottom
-            
+
             # If detail is low, just draw a simple gray depth bar
             if detail == "low":
                 SubElement(svg, "rect", {
@@ -609,19 +609,19 @@ def render_svg_snapshot(
                     "width": "1", "height": str(h), "fill": color
                 })
                 current_stack_y -= h
-            
+
             if "ref" in base_heights and base_heights["ref"] > 0:
                 h = base_heights["ref"]
                 SubElement(svg, "rect", {
                     "x": str(draw_x), "y": str(current_stack_y - h),
                     "width": "1", "height": str(h), "fill": "#b4b4b4"
                 })
-        
+
         # Arcs for RNA mode in aggregate coverage
         if is_rna:
             arc_color_hex = "#fdd1d3"
             arc_anchor_y = track_y_start + 15 + coverage_height + coverage_height // 2
-            
+
             # 1. Internal arcs (ref_skip) from all reads
             for r in all_reads:
                 ref_cursor = r.start
@@ -633,11 +633,11 @@ def render_svg_snapshot(
                         xb = margin + int((seg_end - start) / bp_per_px)
                         xa = max(margin, min(width - margin - 1, xa))
                         xb = max(margin, min(width - margin - 1, xb))
-                        
+
                         if xb - xa < 2:
                             ref_cursor += seg.ref_consumed
                             continue
-                        
+
                         w = xb - xa
                         h = min(w // 2, coverage_height)
                         mid_x = (xa + xb) / 2
@@ -648,12 +648,12 @@ def render_svg_snapshot(
                             "stroke-opacity": "0.6", "stroke-width": "0.5"
                         })
                     ref_cursor += seg.ref_consumed
-            
+
             # 2. Split read arcs from all reads
             groups_temp: Dict[str, List[int]] = {}
             for idx_r, r in enumerate(all_reads):
                 groups_temp.setdefault(r.qname, []).append(idx_r)
-            
+
             for qname, idxs in groups_temp.items():
                 if len(idxs) > 1:
                     idxs_sorted = sorted(idxs, key=lambda i: all_reads[i].start)
@@ -674,9 +674,9 @@ def render_svg_snapshot(
                                 "d": path_d, "fill": "none", "stroke": arc_color_hex,
                                 "stroke-opacity": "0.6", "stroke-width": "1"
                             })
-        
+
         current_y = track_y_start + aggregate_coverage_h
-    
+
     # Draw annotation track if enabled
     if gff_genes:
         current_y += draw_svg_gene_track(
@@ -702,7 +702,7 @@ def render_svg_snapshot(
             margin,
             bed_stacks
         )
-    
+
     # Iterate over tracks
     for i, track in enumerate(tracks):
         reads = track['reads']
@@ -710,7 +710,7 @@ def render_svg_snapshot(
         meta = track_meta[i]
         stacks = meta['stacks']
         reads_area_h = meta['reads_area_h']
-        
+
         # Draw read track header
         header_y = current_y
         SubElement(svg, "rect", {
@@ -733,17 +733,17 @@ def render_svg_snapshot(
         })
         header_text.text = track_title
         current_y += 15
-        
+
         # Draw reads
         reads_start_y = current_y
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
             groups.setdefault(r.qname, []).append(idx_r)
-        
+
         for idx, r in enumerate(reads):
             y = reads_start_y + stacks[idx] * (read_height + 1)
             rects = segments_to_pixels(r.segments, r.start, start, bp_per_px, detail=detail)
-            
+
             rect_to_seg = {}
             ref_cursor = r.start
             rect_idx = 0
@@ -759,21 +759,21 @@ def render_svg_snapshot(
                     rect_to_seg[rect_idx] = seg_idx
                     rect_idx += 1
                 ref_cursor += seg.ref_consumed
-            
+
             for rect_idx, (t, x0, x1) in enumerate(rects):
                 x0_draw = margin + x0
                 x1_draw = margin + x1
-                
+
                 if t == "ins":
                     if x0 < 0 or x0 > (width - 2 * margin):
                         continue
-                
+
                 x0_draw = max(margin, min(width - margin, x0_draw))
                 x1_draw = max(margin, min(width - margin, x1_draw))
-                
+
                 if x1_draw <= x0_draw and t != "ins":
                     continue
-                
+
                 if color_by == "type":
                     color = color_for_type(t)
                 elif color_by == "strand":
@@ -783,9 +783,9 @@ def render_svg_snapshot(
                     color = shade_by_mapq(base_color, r.mapq)
                 else:
                     color = color_for_type(t)
-                
+
                 color_hex = rgb_to_hex(color)
-                
+
                 if t == "ins":
                     SubElement(svg, "line", {
                         "x1": str(x0_draw), "y1": str(y),
@@ -849,7 +849,7 @@ def render_svg_snapshot(
                             current_color_hex = "#c3c3c3"
                     else:
                         current_color_hex = "#c3c3c3"
-                        
+
                     SubElement(svg, "rect", {
                         "x": str(x0_draw), "y": str(y),
                         "width": str(x1_draw - x0_draw), "height": str(read_height),
