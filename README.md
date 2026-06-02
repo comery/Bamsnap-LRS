@@ -388,13 +388,16 @@ Bamsnap-LRS supports RNA-seq data visualization with splice junction arcs:
 ### Structural Variant Visualization
 
 Example SV snapshots are available in `example/SV_show/`:
-
+**insertion**
 ![Insertion Example](example/SV_show/insertion.onebam_chrX_26021720_26022020.svg)
 
+**deletion**
 ![Deletion Example](example/SV_show/deletion.onebam_chr1_24314927_24320831.svg)
 
+**inversion**
 ![Inversion Example](example/SV_show/inversion_chrX_5770557_5773392.svg)
 
+**duplication**
 ![Inversion Example](example/SV_show/duplication_chr11_54871000_54876965.svg)
 
 These examples demonstrate how long-read split alignments and supplementary alignments can help inspect intra-chromosomal structural variants. Translocation / inter-chromosomal breakend visualization is not currently supported as a dedicated mode.
