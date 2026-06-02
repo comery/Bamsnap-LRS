@@ -395,6 +395,8 @@ Example SV snapshots are available in `example/SV_show/`:
 
 ![Inversion Example](example/SV_show/inversion_chrX_5770557_5773392.svg)
 
+![Inversion Example](example/SV_show/duplication_chr11_54871000_54876965.svg)
+
 These examples demonstrate how long-read split alignments and supplementary alignments can help inspect intra-chromosomal structural variants. Translocation / inter-chromosomal breakend visualization is not currently supported as a dedicated mode.
 
 ### Highlight Mode Visualization
