@@ -2,7 +2,7 @@
 # 测试脚本 - 使用示例文件生成不同格式的输出
 
 # 设置 PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/new_scr"
 
 # 测试区域
 CHROM="chrM"
@@ -20,7 +20,7 @@ echo ""
 
 # SVG
 echo "1. single pos, output SVG"
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:1-10000" \
     --out example/chrM_1_10000.bamsnapLRS.svg \
@@ -39,7 +39,7 @@ fi
 
 # PDF
 echo "2. single pos, output PDF"
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
     --out example/chrM_1000_3000.bamsnapLRS.pdf \
@@ -57,11 +57,11 @@ else
     echo "✗ PDF output failed"
 fi
 
-region.bed
+#region.bed
 
 # PDF
 echo "2.1, multiple pos, output PDF"
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam "$BAM" \
     --regions example/region.bed \
 	--out-prefix example/batch \
@@ -80,10 +80,9 @@ else
 fi
 
 
-<<EOF
 # PDF
 echo "3. Multiple Bam..."
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
 	--bam "$BAM" \
 	--bam "$BAM" \
     --pos "${CHROM}:${START}-${END}" \
@@ -103,7 +102,7 @@ fi
 
 # RNA
 echo "4. RNA 比对可视化..."
-bin/bamsnap-lrs rna \
+python bin/bamsnap-lrs rna \
 	--bam example/rna/test.rna.bam \
 	--pos Cdec_SDR_X:200000-300000 \
 	--out example/rna/test.rna.svg \
@@ -116,4 +115,26 @@ if [ $? -eq 0 ]; then
 else
     echo "✗ SVG output failed"
 fi
-EOF
+
+
+python bin/bamsnap-lrs dna \
+	--bam "$BAM" \
+    --pos "${CHROM}:${START}-${END}" \
+    --out example/chrM_1000_3000.gff.bamsnapLRS.pdf \
+    --fa "$FASTA" \
+    --show-axis \
+    --show-coverage \
+    --track-title "Test Reads - PDF" \
+    --width 1500 \
+    -g example/test.gff
+    
+python bin/bamsnap-lrs dna \
+	--bam "$BAM" \
+    --pos "${CHROM}:${START}-${END}" \
+    --out example/chrM_1000_3000.gff.bamsnapLRS.svg \
+    --fa "$FASTA" \
+    --show-axis \
+    --show-coverage \
+    --track-title "Test Reads - SVG" \
+    --width 1500 \
+    -g example/test.gff
