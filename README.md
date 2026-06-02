@@ -4,7 +4,7 @@
 
 Bamsnap-LRS is a command-line tool that generates high-quality, publication-ready visualizations of genomic alignments from BAM/CRAM files. It provides a **static implementation of JBrowse-style rendering**, allowing you to create genome browser snapshots without running a web server.
 
-The current version keeps the original DNA/RNA snapshot modes and adds two practical extensions for long-read variant visualization:
+The current version adds two practical extensions for long-read variant visualization:
 
 - **Structural variant snapshots** from BED/VCF region files, especially for insertion, deletion, duplication, and inversion events.
 - **VCF highlight mode** for displaying target SNP/small-variant sites on individual reads and showing haplotype-like linkage patterns.
@@ -28,7 +28,6 @@ The current version keeps the original DNA/RNA snapshot modes and adds two pract
 
 ### Structural Variant Snapshot Support
 - **VCF/BED batch input**: Use `--regions` to process multiple regions from a BED or VCF file.
-- **Automatic SV window inference**: For VCF records, the plotting interval can be inferred from `SVTYPE`, `END`, `SVLEN`, REF/ALT length, and symbolic alleles.
 - **Automatic padding**: When `--padding` is omitted, insertions and small variants use a compact window, while larger SVs use a wider window based on approximate SV length.
 - **Focus region shading**: The original target interval from BED/VCF is highlighted with a pale background inside the wider padded plotting window.
 - **Supported example SV types**: insertion, deletion, duplication, and inversion.
@@ -58,8 +57,6 @@ The current version keeps the original DNA/RNA snapshot modes and adds two pract
 - **PDF**: High-quality PDF output via CairoSVG.
 - **PNG**: Raster output for quick preview and sharing.
 
-The CLI uses SVG rendering as the single source of truth. PNG and PDF outputs are generated from the same SVG content to keep all output formats visually consistent.
-
 ## 📦 Installation
 
 ### Requirements
@@ -80,7 +77,7 @@ chmod +x bin/bamsnap-lrs
 
 ### Basic Usage (DNA)
 ```bash
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out snapshot.svg
@@ -88,7 +85,7 @@ bin/bamsnap-lrs dna \
 
 ### RNA Analysis
 ```bash
-bin/bamsnap-lrs rna \
+python bin/bamsnap-lrs rna \
     --bam your_rna_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out rna_snapshot.svg \
@@ -97,7 +94,7 @@ bin/bamsnap-lrs rna \
 
 ### With Reference Genome (for mismatch detection)
 ```bash
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --pos chr1:1000000-1001000 \
     --out snapshot.svg \
@@ -107,7 +104,7 @@ bin/bamsnap-lrs dna \
 
 ### Batch Region Plotting from BED/VCF
 ```bash
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam your_alignments.bam \
     --regions example/test_regions.vcf \
     --out-prefix example/batch.svg \
@@ -116,45 +113,32 @@ bin/bamsnap-lrs dna \
     --show-coverage
 ```
 
-When `--regions` is used, `--out-prefix` is required. Output files are named using the prefix and each parsed genomic interval, for example:
-
-```text
-batch_chrM_0_3000.svg
-batch_chrM_6750_11250.svg
-```
+When `--regions` is used, `--out-prefix` is required. Output files are named using the prefix and each parsed genomic interval, for example:`batch_chrM_0_3000.svg` 
 
 ### Structural Variant Snapshot Example
 ```bash
-bin/bamsnap-lrs dna \
+python bin/bamsnap-lrs dna \
     --bam example/SV_show/insertion.HIFI.bam \
-          example/SV_show/insertion.ONT.bam \
-          example/SV_show/insertion.Cyclone.bam \
+    --bam example/SV_show/insertion.ONT.bam \
+    --bam example/SV_show/insertion.Cyclone.bam \
     --regions example/SV_show/insertion.vcf \
     --out-prefix example/SV_show/insertion.svg \
     --show-axis \
     --show-coverage \
-    --show-supp \
-    --width 1200
+    --show-supp
 ```
 
-For SV visualization, `--show-supp` is recommended because supplementary/split alignments often provide the most direct evidence for large insertions, deletions, duplications, and inversions.
+For SV visualization, `--show-supp` is recommended because supplementary/split alignments often provide the most direct evidence for duplications and inversions.
 
 ### VCF Highlight Example
 ```bash
-bin/bamsnap-lrs highlight \
+python bin/bamsnap-lrs highlight \
     --bam example/highlight/sample1.hignlignt.bam \
-          example/highlight/sample2.hignlignt.bam \
-    --pos chr21:start-end \
+    --bam example/highlight/sample2.hignlignt.bam \
+    --pos chrom:start-end \
     --highlight-vcf example/highlight/region_chr21.vcf.gz \
     --out example/highlight/highlight.svg \
-    --show-coverage \
-    --width 1200
-```
-
-Replace `chr21:start-end` with the region containing the VCF sites you want to highlight. The example VCF is located at:
-
-```text
-example/highlight/region_chr21.vcf.gz
+    --show-coverage
 ```
 
 ## 📖 Command Reference
@@ -250,7 +234,7 @@ For BED/VCF batch plotting, the target interval is drawn as a pale background re
 
 For VCF input:
 
-- `SVTYPE=INS`, symbolic `<INS>`, or `END=POS` insertion-like records use a compact window.
+- insertion-like records use a compact window.
 - Larger DEL/DUP/INV/CNV-like records use a window based on the approximate SV length.
 - If `--padding` is supplied, the user-provided value overrides automatic padding.
 
@@ -291,82 +275,27 @@ BED features can be displayed with `--bed`. BED3 through BED12-style records are
 
 ### SVG Output
 ```bash
-bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
+python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
 ```
 Best for publications, presentations, web embedding, and post-editing.
 
 ### PDF Output
 ```bash
-bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
+python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
 ```
 Requires the `cairosvg` package. Ideal for print-quality documents.
 
 ### PNG Output
 ```bash
-bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
+python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
 ```
 Quick raster output for previews and sharing.
 
 ### RNA Output
 ```bash
-bin/bamsnap-lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
+python bin/bamsnap-lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
 ```
 Includes splice junction arcs.
-
-### SV Output Examples
-```bash
-# Insertion
-bin/bamsnap-lrs dna \
-    --bam example/SV_show/insertion.HIFI.bam example/SV_show/insertion.ONT.bam example/SV_show/insertion.Cyclone.bam \
-    --regions example/SV_show/insertion.vcf \
-    --out-prefix example/SV_show/insertion.svg \
-    --show-axis --show-coverage --show-supp
-
-# Deletion
-bin/bamsnap-lrs dna \
-    --bam example/SV_show/deletion.HIFI.bam example/SV_show/deletion.ONT.bam example/SV_show/deletion.Cyclone.bam \
-    --regions example/SV_show/deletion.vcf \
-    --out-prefix example/SV_show/deletion.svg \
-    --show-axis --show-coverage --show-supp
-
-# Duplication
-bin/bamsnap-lrs dna \
-    --bam example/SV_show/duplication.HIFI.bam \
-    --regions example/SV_show/duplication.vcf \
-    --out-prefix example/SV_show/duplication.svg \
-    --show-axis --show-coverage --show-supp
-
-# Inversion
-bin/bamsnap-lrs dna \
-    --bam example/SV_show/inversion.HIFI.bam \
-    --regions example/SV_show/inversion.vcf \
-    --out-prefix example/SV_show/inversion.svg \
-    --show-axis --show-coverage --show-supp
-```
-
-Example outputs include:
-
-- `example/SV_show/insertion_chrX_26021720_26022020.svg`
-- `example/SV_show/deletion_chr1_24314927_24320831.svg`
-- `example/SV_show/duplication_chr12_79735434_79751950.svg`
-- `example/SV_show/inversion_chrX_5770557_5773392.svg`
-
-### Highlight Output Example
-```bash
-bin/bamsnap-lrs highlight \
-    --bam example/highlight/sample1.hignlignt.bam example/highlight/sample2.hignlignt.bam \
-    --pos chr21:start-end \
-    --highlight-vcf example/highlight/region_chr21.vcf.gz \
-    --out example/highlight/highlight.svg \
-    --show-coverage \
-    --width 1200
-```
-
-Example output:
-
-```text
-example/highlight/highlight.svg
-```
 
 ## 🔧 Advanced Usage
 
@@ -502,40 +431,6 @@ The highlight example is available in `example/highlight/`:
 
 This mode is designed to show how reads span multiple VCF target sites and to make allele-linkage patterns easier to inspect in a static figure.
 
-## 📁 Project Structure
-
-```text
-Bamsnap-LRS-main/
-├── README.md
-├── requirements.txt
-├── run_example.sh
-├── bin/
-│   └── bamsnap-lrs
-├── scr/
-│   └── bamsnap_lrs/
-│       ├── cli.py                    # Command-line interface
-│       ├── reader.py                 # BAM/CRAM reading and read normalization
-│       ├── svg_renderer.py           # Main SVG rendering engine
-│       ├── png_renderer.py           # SVG-to-PNG compatibility wrapper
-│       ├── png_renderer_legacy_full.py # Legacy full PNG renderer
-│       ├── cigar.py                  # CIGAR/MD/cs parsing
-│       ├── pileup.py                 # Coverage and base pileup calculation
-│       ├── layout.py                 # Read/annotation stacking and pixel layout
-│       ├── styles.py                 # Color schemes
-│       ├── ref.py                    # Reference FASTA sequence retrieval
-│       ├── gff.py                    # GFF/GTF annotation parser
-│       ├── bed.py                    # BED annotation parser
-│       ├── regions.py                # BED/VCF region parser for batch/SV plotting
-│       └── highlight.py              # VCF target-site highlight parser
-├── tests/                            # Unit tests
-├── utility/
-│   └── convert_gff_to_bed.py
-└── example/
-    ├── rna/                          # RNA example data
-    ├── SV_show/                      # SV snapshot examples
-    ├── highlight/                    # VCF highlight examples
-    └── other example BAM/FASTA/GFF/BED files
-```
 
 ## 📄 License
 
