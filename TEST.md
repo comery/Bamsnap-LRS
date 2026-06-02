@@ -29,7 +29,7 @@ pip3 install --user -r requirements.txt
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
 # 生成 PNG 格式
-python3 -m bamsnap_lrs dna \
+python bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.png \
@@ -40,7 +40,7 @@ python3 -m bamsnap_lrs dna \
     --width 1200
 
 # 生成 SVG 格式
-python3 -m bamsnap_lrs dna \
+python bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.svg \
@@ -51,7 +51,7 @@ python3 -m bamsnap_lrs dna \
     --width 1200
 
 # 生成 PDF 格式
-python3 -m bamsnap_lrs dna \
+python bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-2000 \
     --out test_output.pdf \
