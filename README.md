@@ -271,32 +271,6 @@ Highlight mode changes the read display to make target-site linkage easier to se
 ### BED Annotation Track
 BED features can be displayed with `--bed`. BED3 through BED12-style records are supported, including optional feature names, strand information, item RGB colors, and block structures when available.
 
-## 📊 Output Examples
-
-### SVG Output
-```bash
-python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.svg
-```
-Best for publications, presentations, web embedding, and post-editing.
-
-### PDF Output
-```bash
-python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.pdf
-```
-Requires the `cairosvg` package. Ideal for print-quality documents.
-
-### PNG Output
-```bash
-python bin/bamsnap-lrs dna --bam data.bam --pos chr1:1000-2000 --out result.png
-```
-Quick raster output for previews and sharing.
-
-### RNA Output
-```bash
-python bin/bamsnap-lrs rna --bam data.bam --pos chr1:1000-2000 --out result.svg
-```
-Includes splice junction arcs.
-
 ## 🔧 Advanced Usage
 
 ### Using MD/CS Tags
