@@ -92,16 +92,6 @@ python bin/bamsnap-lrs rna \
     --coverage-height 100
 ```
 
-### With Reference Genome (for mismatch detection)
-```bash
-python bin/bamsnap-lrs dna \
-    --bam your_alignments.bam \
-    --pos chr1:1000000-1001000 \
-    --out snapshot.svg \
-    --fa reference.fasta \
-    --show-axis
-```
-
 ### Batch Region Plotting from BED/VCF
 ```bash
 python bin/bamsnap-lrs dna \
