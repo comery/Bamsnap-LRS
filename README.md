@@ -388,6 +388,7 @@ Bamsnap-LRS supports RNA-seq data visualization with splice junction arcs:
 ### Structural Variant Visualization
 
 Example SV snapshots are available in `example/SV_show/`:
+
 **insertion**
 ![Insertion Example](example/SV_show/insertion.onebam_chrX_26021720_26022020.svg)
 
