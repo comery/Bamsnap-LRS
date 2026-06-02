@@ -390,7 +390,7 @@ Below is a side-by-side comparison showing the same genomic region visualized by
 
 **Bamsnap-LRS (Static SVG Output)**
 
-![Bamsnap-LRS Output](example/chrM_1000_3000.bamsnapLRS.svg)
+![Bamsnap-LRS Output](example/chrM_1000_3000.gff.bamsnapLRS.svg)
 
 Both images show the same genomic region with similar visual elements:
 
@@ -415,9 +415,9 @@ Bamsnap-LRS supports RNA-seq data visualization with splice junction arcs:
 
 Example SV snapshots are available in `example/SV_show/`:
 
-![Insertion Example](example/SV_show/insertion_chrX_26021720_26022020.svg)
+![Insertion Example](example/SV_show/insertion.onebam_chrX_26021720_26022020.svg)
 
-![Deletion Example](example/SV_show/deletion_chr1_24314927_24320831.svg)
+![Deletion Example](example/SV_show/deletion.onebam_chr1_24314927_24320831.svg)
 
 ![Inversion Example](example/SV_show/inversion_chrX_5770557_5773392.svg)
 
