@@ -15,10 +15,10 @@ fi
 ## insertion
 python  ../../bin/bamsnap-lrs dna \
   --bam insertion.Cyclone.bam --bam insertion.HIFI.bam --bam insertion.ONT.bam \
-  --regions insertion.vcf  --out-prefix insertion.svg  --show-axis --show-coverage \
-  $FASTA_ARG
+  --regions insertion.vcf  --out-prefix insertion.svg  --show-axis --show-coverage --padding 50  \
+  $FASTA_ARG 
 python  ../../bin/bamsnap-lrs dna \
-  --bam insertion.HIFI.bam --regions insertion.vcf  --out-prefix insertion.onebam.svg  --show-axis --show-coverage \
+  --bam insertion.HIFI.bam --regions insertion.vcf  --out-prefix insertion.onebam.svg  --show-axis --show-coverage --padding 50  \
   $FASTA_ARG
 
 ## deletion
