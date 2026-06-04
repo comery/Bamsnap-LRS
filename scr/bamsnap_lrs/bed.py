@@ -1,4 +1,3 @@
-##解析BED文件 可处理BED格式从3列到12列（最详尽）的所有情况
 import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
