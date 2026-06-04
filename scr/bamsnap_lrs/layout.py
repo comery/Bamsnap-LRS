@@ -1,12 +1,9 @@
-#该脚本（layout.py）作用：为测序比对、注释等可视化渲染做布局计算，
+#作用：为测序比对、注释等可视化渲染做布局计算，负责把基因组区间映射到图片坐标，并合理分层显示。
 #即把基因组上的片段、特征等信息，转换为适合绘图的像素坐标和堆叠层级，避免显示重叠。
-#
 #主要功能包括：
-#
 #segments_to_pixels：把比对片段（如match、ins、del等）转换为像素区间，便于在图片上准确绘制。
 #assign_stacks：为reads分配堆叠层级，保证同一层的reads不重叠，适合pileup可视化。
 #assign_bed_stacks：为注释特征（如BED区间）分配堆叠层级，避免特征之间视觉重叠，可设置最小间距。
-#简言之：这是Bamsnap-LRS可视化模块的布局引擎，负责把基因组区间映射到图片坐标，并合理分层显示。
 
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any, Optional
