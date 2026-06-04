@@ -1,6 +1,6 @@
 #!/bin/bash
 # ====================== auto check FASTA file ======================
-FASTA_FILE="chm13v2.0.fasta"
+FASTA_FILE="hg38.fasta"
 
 if [ -f "$FASTA_FILE" ]; then
     echo "reference exist $FASTA_FILE, run command with --fa"
@@ -11,6 +11,6 @@ else
     FASTA_ARG=""
 fi
 
-python  bin/bamsnap-lrs highlight  --highlight-vcf region_chr21.vcf.gz \
+python  ../../bin/bamsnap-lrs highlight  --highlight-vcf region_chr21.vcf.gz \
   --bam sample1.hignlignt.bam --bam sample2.hignlignt.bam \
-  --pos chr21:20462000-20467000 --out highlight.svg --max-reads 50 --fa chr21.fa
+  --pos chr21:20462000-20467000 --out highlight.svg --max-reads 20 $FASTA_ARG
