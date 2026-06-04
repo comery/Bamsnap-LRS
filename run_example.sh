@@ -1,10 +1,7 @@
 #!/bin/bash
-# 测试脚本 - 使用示例文件生成不同格式的输出
+# test script - product different format output using example file
 
-# 设置 PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/new_scr"
-
-# 测试区域
+#####
 CHROM="chrM"
 START=1000
 END=3000
