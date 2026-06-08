@@ -159,7 +159,7 @@ Both commands support similar options, with `rna` adding support for splice junc
 | `--gff` | GFF/GTF file path for gene annotation. Mutually exclusive with `--bed`. | - |
 | `--bed` | BED file path for feature annotation. Mutually exclusive with `--gff`. | - |
 | `--style` | Rendering style: `default` or `jbrowse`. | `jbrowse` |
-| `--detail` | Detail level: `low`, `mid`, or `high`. | `mid` |
+| `--detail` | Detail level: `low`, `mid`, or `high`. Choosing `low` ,the result will not show mismatch, will show indels; choosing `mid`, the result will show mismatch and indels; choosing `high`, the result will show mismatch, indels, and indels' length.| `mid` |
 | `--downsample-strategy` | Downsampling strategy: `mapq` or `first`. | `mapq` |
 | `--color-by` | Read coloring method: `type`, `base`, `strand`, or `mapq`. | `type` |
 | `--use-md` | Use MD tag to detect mismatches. | False |
