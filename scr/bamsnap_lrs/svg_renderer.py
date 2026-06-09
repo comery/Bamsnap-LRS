@@ -22,11 +22,63 @@ from .pileup import base_pileup, pileup_to_pixels
 from .styles import color_for_type, color_for_base, shade_by_mapq, STRAND_COLORS, MISMATCH_COLORS
 from .highlight import HighlightSite, SampleCall
 
-# Matches PNG renderer: mid-gray for mismatches outside the VCF highlight,
-# darker than the match color (#c3c3c3) so the mismatch shape stays visible.
-# Pale gray for non-VCF mismatches; lighter than match color (#c3c3c3) so
-# the mismatch shape stays visible but doesn't visually compete.
-MUTED_MISMATCH_HEX = "#c8c8c8"
+# Match (and, in highlight mode, every non-target) body color.
+MATCH_HEX = "#c3c3c3"
+# In highlight mode we deliberately ignore all non-target differences: read
+# mismatches and deletions that do NOT fall on a highlighted VCF site are drawn
+# in exactly the same gray as matches (MATCH_HEX), so the only colored marks on
+# a read are the highlighted SNP cells.  (Previously mismatches used a slightly
+# different gray #c8c8c8, which made non-target mismatches stand out.)
+MUTED_MISMATCH_HEX = MATCH_HEX
+
+
+# ----------------------------------------------------------------------------
+# Phasing-block backdrop colors (feature: colored hap backdrops)
+# ----------------------------------------------------------------------------
+# Each VCF sample gets one phase-block base color.  In the VCF highlight
+# track, all PS blocks from the same sample share that hue; hap1 uses the
+# solid color and each lower hap uses a reduced opacity (hap2 -> 50%, hap3 ->
+# 33%, ...).  On the reads, when a read's observed base combination matches
+# one hap of a block, the read row is given the same sample-level
+# color/opacity over that block's span.  Hues are picked to stay clear of the
+# saturated per-base colors (A/C/G/T) used for the SNP cells on top.
+PHASE_BLOCK_PALETTE = [
+    (142, 170, 190),   # muted blue-gray
+    (174, 158, 196),   # muted lavender
+    (188, 166, 132),   # muted sand
+    (170, 190, 160),   # muted sage
+    (196, 155, 165),   # muted rose
+    (150, 180, 180),   # muted cyan-gray
+    (185, 175, 145),   # muted olive-beige
+    (160, 165, 185),   # muted slate
+]
+# Gap between adjacent read rows in hap-sort layout (mirrors
+# _stack_row_offsets different_read_gap); used so the read backdrop band tiles
+# vertically across consecutive same-hap reads.
+READ_ROW_GAP = 4
+
+
+def _hap_row_opacity(hap_idx: int) -> float:
+    """Opacity for hap row `hap_idx` (0-based): hap1=1.0, hap2=0.5, hap3=0.33..."""
+    return 1.0 / (hap_idx + 1)
+
+
+def _sample_phase_block_color(samples: List[str], sname: str) -> Tuple[int, int, int]:
+    """Return the phase-block base color assigned to one VCF sample.
+
+    Phase-block color is intentionally sample-level, not PS-block-level:
+    all PS blocks from the same VCF sample share one hue, while hap rows
+    are distinguished by opacity via `_hap_row_opacity`.  If the VCF has
+    multiple samples, the sample order in the VCF/highlight subset determines
+    the hue.
+    """
+    if not samples:
+        return PHASE_BLOCK_PALETTE[0]
+    try:
+        sample_idx = samples.index(sname)
+    except ValueError:
+        sample_idx = 0
+    return PHASE_BLOCK_PALETTE[sample_idx % len(PHASE_BLOCK_PALETTE)]
 
 
 # Supplementary/split-read fill colors.  SVG uses fill-opacity for the same
@@ -149,6 +201,29 @@ def _svg_rect_attrs_with_optional_opacity(
 def rgb_to_hex(rgb: tuple) -> str:
     """Convert RGB tuple to hex color"""
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _subtract_spans(x0: int, x1: int, spans) -> List[Tuple[int, int]]:
+    """Return sub-intervals of [x0, x1) not covered by any span in `spans`.
+
+    `spans` is an iterable whose items start with (sx0, sx1, ...).  Used so a
+    gray read-body fill is not painted over a hap-colored block span (which
+    would otherwise blend with / cover the hap color).
+    """
+    pieces = [(x0, x1)]
+    for s in spans:
+        sx0, sx1 = s[0], s[1]
+        nxt = []
+        for a, b in pieces:
+            if sx1 <= a or sx0 >= b:
+                nxt.append((a, b))
+                continue
+            if a < sx0:
+                nxt.append((a, min(sx0, b)))
+            if sx1 < b:
+                nxt.append((max(sx1, a), b))
+        pieces = nxt
+    return [(a, b) for a, b in pieces if b > a]
     
 def _read_base_at_pos(read: Read, pos: int) -> Optional[str]:
     """Return the read base aligned to reference position `pos` (0-based).
@@ -918,6 +993,146 @@ def _svg_phase_block_spans(sites, sname):
     return out
 
 
+def _phase_blocks_for_sample(
+    sites: List[HighlightSite],
+    sname: str,
+    samples: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Describe each phased block (one PS) of one sample for backdrop drawing.
+
+    Returns a list (in genomic order) of dicts:
+        ps_id       : phase-set id (str)
+        n_rows      : number of hap rows (sample ploidy)
+        site_indices: indices (into `sites`) of the PHASED sites in this block
+        positions   : their 0-based ref positions (sorted)
+        hap_bases   : {pos: [base_per_hap]} expected allele per hap slot
+        first_pos / last_pos : genomic extent of the run (for the backdrop)
+        color       : sample-level backdrop color (hap1 solid color)
+
+    The backdrop horizontal extent uses the same run span as
+    `_svg_phase_block_spans` so it lines up with the existing block visuals,
+    while read-haplotype matching uses only the phased sites in `hap_bases`.
+    Color is assigned by VCF sample, so different PS blocks within the same
+    sample share one hue and hap rows/read-blocks are distinguished by opacity.
+    """
+    spans = _svg_phase_block_spans(sites, sname)
+    ploidy = _svg_sample_ploidy(sites, sname)
+    sample_color = _sample_phase_block_color(samples or [sname], sname)
+    out: List[Dict[str, Any]] = []
+    for ps_id, idx_list in spans:
+        if ps_id is None:
+            continue
+        phased_idx: List[int] = []
+        hap_bases: Dict[int, List[Optional[str]]] = {}
+        for i in idx_list:
+            call = sites[i].sample_calls.get(sname)
+            if (call is not None and call.is_phased
+                    and call.phase_set == ps_id and call.hap_bases):
+                phased_idx.append(i)
+                hap_bases[sites[i].pos] = list(call.hap_bases)
+        if not phased_idx:
+            continue
+        positions = sorted(sites[i].pos for i in phased_idx)
+        # Run extent (first/last site of the whole PS run, phased endpoints).
+        run_positions = [sites[i].pos for i in idx_list]
+        out.append({
+            "ps_id": ps_id,
+            "n_rows": ploidy,
+            "site_indices": phased_idx,
+            "positions": positions,
+            "hap_bases": hap_bases,
+            "first_pos": min(run_positions),
+            "last_pos": max(run_positions),
+            "color": sample_color,
+        })
+    return out
+
+
+def _primary_highlight_sample(sites: List[HighlightSite],
+                              samples: List[str]) -> Optional[str]:
+    """Sample used for read-haplotype backdrops: first phased sample, else first."""
+    if not samples:
+        return None
+    for s in samples:
+        if any(sites[i].sample_calls.get(s, SampleCall()).is_phased
+               for i in range(len(sites))):
+            return s
+    return samples[0]
+
+
+def _normalize_sample_label(value: Optional[str]) -> str:
+    """Normalize a sample/track label for lightweight matching."""
+    label = str(value or "").strip().lower()
+    for sep in ("/", "\\"):
+        if sep in label:
+            label = label.rsplit(sep, 1)[-1]
+    for suffix in (".bam", ".cram", ".sam"):
+        if label.endswith(suffix):
+            label = label[:-len(suffix)]
+            break
+    return "".join(ch for ch in label if ch.isalnum())
+
+
+def _highlight_sample_for_track(
+    track_title: Optional[str],
+    sites: List[HighlightSite],
+    samples: List[str],
+) -> Optional[str]:
+    """Choose which VCF sample should drive read-haplotype backdrops.
+
+    When a BAM track title matches a VCF sample name, use that sample so
+    multi-sample VCFs can show sample-specific read-block colors.  Otherwise
+    fall back to the original behavior: first phased sample, else first sample.
+    """
+    if not samples:
+        return None
+    norm_title = _normalize_sample_label(track_title)
+    if norm_title:
+        for s in samples:
+            if _normalize_sample_label(s) == norm_title:
+                return s
+        for s in samples:
+            norm_sample = _normalize_sample_label(s)
+            if norm_sample and (norm_sample in norm_title or norm_title in norm_sample):
+                return s
+    return _primary_highlight_sample(sites, samples)
+
+
+def _read_matched_hap(read: Read, block: Dict[str, Any]) -> Optional[int]:
+    """Return the hap index this read is uniquely consistent with for `block`.
+
+    Only *distinguishing* sites (where the haps differ) are used to decide
+    consistency.  A read is assigned a hap iff it covers at least one
+    distinguishing site and is consistent with exactly one hap; otherwise
+    (no coverage of distinguishing sites, or a tie/conflict) returns None.
+    """
+    n_rows = block["n_rows"]
+    hap_bases = block["hap_bases"]
+    consistent = set(range(n_rows))
+    covered_distinguishing = 0
+    for pos in block["positions"]:
+        bases = hap_bases.get(pos)
+        if not bases:
+            continue
+        present = [b for b in bases if b is not None]
+        distinguishing = len(set(present)) > 1
+        if not distinguishing:
+            continue
+        rb = _read_base_at_pos(read, pos)
+        if rb is None or rb not in ("A", "C", "G", "T"):
+            continue
+        covered_distinguishing += 1
+        consistent = {
+            r for r in consistent
+            if r < len(bases) and bases[r] is not None and bases[r] == rb
+        }
+        if not consistent:
+            return None
+    if covered_distinguishing >= 1 and len(consistent) == 1:
+        return next(iter(consistent))
+    return None
+
+
 def draw_svg_vcf_highlight_track(
     svg,
     sites: List[HighlightSite],
@@ -1019,22 +1234,26 @@ def draw_svg_vcf_highlight_track(
                 "fill": UNPHASED_BG
             })
 
-        # Phase-block backdrops (span all N rows)
+        # Phase-block backdrops.  Color is assigned at sample level:
+        # all PS blocks from the same sample share one hue, while hap1/hap2
+        # and higher ploidy rows are distinguished by opacity.  Different
+        # VCF samples get different hues according to VCF/sample-subset order.
+        sample_block_color = _sample_phase_block_color(samples, sname)
         for ps_id, idx_list in blocks:
             if ps_id is None:
                 continue
+            block_color = sample_block_color
             first_x = site_to_x(sites[idx_list[0]].pos)
             last_x = site_to_x(sites[idx_list[-1]].pos) + cell_w
             first_x = max(plot_x0, first_x)
             last_x = min(plot_x1, last_x)
             if last_x <= first_x:
                 continue
-            SubElement(svg, "rect", {
-                "x": str(first_x), "y": str(sample_top),
-                "width": str(last_x - first_x),
-                "height": str(sample_bottom - sample_top),
-                "fill": PHASE_BG
-            })
+            for r_idx in range(n_rows):
+                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                    first_x, row_y0[r_idx], last_x - first_x, SVG_VCF_BASE_ROW_H,
+                    rgb_to_hex(block_color), _hap_row_opacity(r_idx),
+                ))
 
         sites_in_ps = set()
         for ps_id, idx_list in blocks:
@@ -1433,6 +1652,17 @@ def render_svg_snapshot(
     if highlight_sites:
         svg_highlight_index = {s.pos: s for s in highlight_sites}
 
+    # Phase blocks (with assigned backdrop colors) by VCF sample. Used to tint
+    # read rows that uniquely match a hap pattern. For multi-sample VCFs, a BAM
+    # track whose title matches a VCF sample uses that sample's block color;
+    # otherwise we fall back to the first phased sample, preserving old behavior.
+    read_hap_blocks_by_sample: Dict[str, List[Dict[str, Any]]] = {}
+    if highlight_sites and highlight_samples:
+        for _sname in highlight_samples:
+            _blocks = _phase_blocks_for_sample(highlight_sites, _sname, highlight_samples)
+            if _blocks:
+                read_hap_blocks_by_sample[_sname] = _blocks
+
     # Iterate over tracks
     for i, track in enumerate(tracks):
         reads = track['reads']
@@ -1474,6 +1704,12 @@ def render_svg_snapshot(
 
         # Draw reads
         reads_start_y = current_y
+        read_hap_blocks: List[Dict[str, Any]] = []
+        if read_hap_blocks_by_sample and highlight_sites and highlight_samples:
+            _track_sample = _highlight_sample_for_track(track_title, highlight_sites, highlight_samples)
+            if _track_sample:
+                read_hap_blocks = read_hap_blocks_by_sample.get(_track_sample, [])
+
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
             groups.setdefault(r.qname, []).append(idx_r)
@@ -1482,6 +1718,35 @@ def render_svg_snapshot(
         for idx, r in enumerate(reads):
             y = reads_start_y + row_offsets[stacks[idx]]
             rects = segments_to_pixels(r.segments, r.start, start, bp_per_px, detail=detail)
+
+            # Haplotype-colored read body: where this read uniquely matches one
+            # hap of a phase block, the read body over that block's span is
+            # painted directly in the hap color (hap1 solid, hap2 50%, ...) —
+            # the same color/opacity used in the VCF highlight track above —
+            # instead of the default gray.  We pre-compute the pixel spans here,
+            # draw the colored base body now, and below skip the gray fill on
+            # match/mismatch segments that fall inside these spans.  Colored SNP
+            # cells are still drawn on top.
+            matched_px_spans: List[Tuple[int, int, str, float]] = []
+            if read_hap_blocks and not supplementary_read_styles.get(idx):
+                for _blk in read_hap_blocks:
+                    _hap = _read_matched_hap(r, _blk)
+                    if _hap is None:
+                        continue
+                    bgx0 = margin + int((max(_blk["first_pos"], r.start, start) - start) / bp_per_px)
+                    bgx1 = margin + int((min(_blk["last_pos"] + 1, r.end, end) - start) / bp_per_px)
+                    bgx0 = max(margin, min(width - margin, bgx0))
+                    bgx1 = max(margin, min(width - margin, bgx1))
+                    if bgx1 <= bgx0:
+                        continue
+                    matched_px_spans.append(
+                        (bgx0, bgx1, rgb_to_hex(_blk["color"]), _hap_row_opacity(_hap))
+                    )
+            for _sx0, _sx1, _scol, _sop in matched_px_spans:
+                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                    _sx0, y, _sx1 - _sx0, read_height, _scol, _sop,
+                ))
+
             supp_style = supplementary_read_styles.get(idx)
             # Draw insertion blocks after the read body. If they are drawn in
             # segment order, the following match block can cover part of the
@@ -1567,12 +1832,20 @@ def render_svg_snapshot(
                 elif t == "del":
                     # Highlight mode: draw del in muted-gray so it blends in
                     # with matches and doesn't steal attention from VCF sites.
+                    # Inside a hap-colored block span we skip the gray so a
+                    # small deletion does not punch a gray hole in the colored
+                    # haplotype block (the colored base body shows through).
                     del_fill = MUTED_MISMATCH_HEX if svg_highlight_index else "#808080"
-                    SubElement(svg, "rect", {
-                        "x": str(x0_draw), "y": str(y),
-                        "width": str(x1_draw - x0_draw), "height": str(read_height),
-                        "fill": del_fill, "stroke": "none", "stroke-width": "1"
-                    })
+                    del_pieces = (
+                        _subtract_spans(x0_draw, x1_draw, matched_px_spans)
+                        if matched_px_spans else [(x0_draw, x1_draw)]
+                    )
+                    for gx0, gx1 in del_pieces:
+                        SubElement(svg, "rect", {
+                            "x": str(gx0), "y": str(y),
+                            "width": str(gx1 - gx0), "height": str(read_height),
+                            "fill": del_fill, "stroke": "none", "stroke-width": "1"
+                        })
                     if not svg_highlight_index and detail == "high" and show_insertion_labels:
                         seg_idx = rect_to_seg.get(rect_idx)
                         if seg_idx is not None:
@@ -1637,11 +1910,12 @@ def render_svg_snapshot(
                                 rgb_to_hex(fill_rgb), fill_opacity
                             ))
                         else:
-                            SubElement(svg, "rect", {
-                                "x": str(x0_draw), "y": str(y),
-                                "width": str(x1_draw - x0_draw), "height": str(read_height),
-                                "fill": MUTED_MISMATCH_HEX, "stroke": "none"
-                            })
+                            for gx0, gx1 in _subtract_spans(x0_draw, x1_draw, matched_px_spans):
+                                SubElement(svg, "rect", {
+                                    "x": str(gx0), "y": str(y),
+                                    "width": str(gx1 - gx0), "height": str(read_height),
+                                    "fill": MUTED_MISMATCH_HEX, "stroke": "none"
+                                })
                         if r.seq and rect_idx in rect_to_seg:
                             seg_idx = rect_to_seg[rect_idx]
                             seg = r.segments[seg_idx]
@@ -1682,11 +1956,12 @@ def render_svg_snapshot(
                                 rgb_to_hex(fill_rgb), fill_opacity
                             ))
                         else:
-                            SubElement(svg, "rect", {
-                                "x": str(x0_draw), "y": str(y),
-                                "width": str(x1_draw - x0_draw), "height": str(read_height),
-                                "fill": "#c3c3c3", "stroke": "none"
-                            })
+                            for gx0, gx1 in _subtract_spans(x0_draw, x1_draw, matched_px_spans):
+                                SubElement(svg, "rect", {
+                                    "x": str(gx0), "y": str(y),
+                                    "width": str(gx1 - gx0), "height": str(read_height),
+                                    "fill": "#c3c3c3", "stroke": "none"
+                                })
                         if svg_highlight_index and r.seq and rect_idx in rect_to_seg:
                             seg_idx = rect_to_seg[rect_idx]
                             seg = r.segments[seg_idx]
