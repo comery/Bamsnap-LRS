@@ -1,0 +1,18 @@
+##fileformat=VCFv4.2
+##contig=<ID=scaffold1,length=500>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	SAMPLE1
+scaffold1	26	.	C	A	.	PASS	.	GT	0/1
+scaffold1	61	.	C	G	.	PASS	.	GT:PS	1|0:1001
+scaffold1	96	.	A	T	.	PASS	.	GT:PS	1|0:1001
+scaffold1	131	.	A	G	.	PASS	.	GT:PS	1|0:1001
+scaffold1	166	.	A	C	.	PASS	.	GT:PS	1|0:1001
+scaffold1	201	.	G	T	.	PASS	.	GT:PS	1|0:1001
+scaffold1	251	.	G	T	.	PASS	.	GT	0/1
+scaffold1	301	.	A	T	.	PASS	.	GT:PS	0|1:2001
+scaffold1	336	.	A	C	.	PASS	.	GT:PS	0|1:2001
+scaffold1	371	.	G	A	.	PASS	.	GT:PS	0|1:2001
+scaffold1	406	.	C	T	.	PASS	.	GT:PS	0|1:2001
+scaffold1	441	.	G	A	.	PASS	.	GT:PS	0|1:2001
+scaffold1	471	.	A	G	.	PASS	.	GT	0/1
