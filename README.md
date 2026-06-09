@@ -395,7 +395,7 @@ These examples demonstrate how long-read split alignments and supplementary alig
 
 ### Highlight Mode Visualization
 
-The highlight example is available in `example/highlight/`:
+The highlight example is available in `example/highlight/highlight_exam`:
 
 ![Highlight Example](example/highlight/highlight_exam/highlight.one.bam.svg)
 
