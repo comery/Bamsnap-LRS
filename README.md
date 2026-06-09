@@ -36,8 +36,8 @@ The current version adds two practical extensions for long-read variant visualiz
 ### VCF Highlight Mode
 - **Dedicated `highlight` command**: A focused mode for SNP and small-variant linkage visualization.
 - **VCF Highlights track**: Shows target VCF sites and per-sample REF/ALT or haplotype rows above the reads.
-- **Target-site read coloring**: Only bases at VCF target positions are strongly colored on reads.
-- **Reduced visual noise**: Non-target mismatches are dimmed to pale gray, insertions are hidden, and deletions are muted in highlight mode.
+- **Phase-block backdrops**: For phased genotypes with `PS`, all blocks from the same VCF sample share one color; haplotypes are distinguished by opacity
+- **Target-site read coloring**: Only bases at VCF target positions are strongly colored on reads, while non-target mismatches and indels are muted.
 - **Haplotype-style sorting**: Reads are sorted by their observed base signature across highlighted VCF sites by default.
 - **Read filtering**: Reads that do not overlap any highlighted VCF site are hidden by default.
 - **Sample selection**: Multi-sample VCFs can be restricted with `--highlight-samples`.
@@ -183,6 +183,9 @@ The `highlight` command reuses the DNA/RNA rendering pipeline but requires a VCF
 | `--mode` | Sequencing mode: `dna` or `rna`. | `dna` |
 | `--no-hap-sort` | Disable read sorting by observed haplotype signature. | hap-sort on |
 | `--no-hap-filter` | Keep reads that do not overlap any highlighted VCF site. | hap-filter on |
+| `--bam` | One or more BAM/CRAM files | required |
+| `--pos` / `--regions` | Single region or batch region input | required |
+| `--out` / `--out-prefix` | Output file for single mode or output prefix for batch mode | required |
 
 All common options from `dna`/`rna` are also available in `highlight` mode, including `--bam`, `--pos`, `--regions`, `--out`, `--out-prefix`, `--fa`, `--show-coverage`, `--gff`, and `--bed`.
 
@@ -228,24 +231,21 @@ For VCF input:
 - Larger DEL/DUP/INV/CNV-like records use a window based on the approximate SV length.
 - If `--padding` is supplied, the user-provided value overrides automatic padding.
 
-### VCF Highlights Track
-In `highlight` mode, a dedicated **VCF Highlights** track is drawn above the reads.
+### VCF Highlight Track
+When `highlight` mode is used, a dedicated **VCF Highlights** track is drawn above the reads:
+- **SNP marker row**: Marks all VCF target sites in the displayed region
+- **Per-sample rows**: Each selected VCF sample is shown separately
+- **Phased genotypes**: `GT` values using `|` together with a valid `PS` tag are rendered as haplotype rows (`sample h1`, `sample h2`, etc.)
+- **Unphased genotypes**: Fall back to REF/ALT row semantics
+- **SNV colors**: Single-base REF/ALT or haplotype alleles are colored by base
+- **Phase-block background**: Sites sharing the same `PS` are connected by a colored backdrop; blocks from the same VCF sample share one hue, while haplotypes are distinguished by opacity
 
-- The top SNP marker row shows target VCF positions.
-- Each sample gets REF/ALT rows or haplotype rows depending on genotype phasing information.
-- Phased sites with `GT` using `|` and a `PS` tag are displayed as haplotype rows.
-- REF/ALT bases use the same base colors as read mismatches.
-- Gray background blocks can indicate phase-set spans.
-
-### Read Coloring in Highlight Mode
-Highlight mode changes the read display to make target-site linkage easier to see:
-
-- Bases at VCF target sites are colored by the observed read base.
-- Non-VCF mismatches are dimmed to pale gray.
-- Insertions are suppressed to reduce visual noise.
-- Deletions are drawn in muted gray.
-- Reads that do not overlap any highlighted VCF site are hidden by default.
-- Reads are sorted by their observed base signature across target sites by default.
+### Highlight-Aware Read Track
+In `highlight` mode, the read track is simplified to emphasize linkage across VCF target sites:
+- **Target-site cells**: Bases aligned to VCF sites are colored by the actual read base, including both match and mismatch segments
+- **Muted non-target differences**: Mismatches, insertions, and deletions outside VCF target sites are drawn in the same gray as matches
+- **Haplotype block tinting**: If a read is uniquely consistent with one haplotype at distinguishing phased sites, the read body over that phase block is tinted using the same sample-level block color and haplotype opacity
+- **Read filtering/sorting**: Reads are filtered to those overlapping target sites and sorted by target-site signature by default
 
 ### Coordinate Axis
 - Genomic position labels with thousands separators
@@ -397,7 +397,7 @@ These examples demonstrate how long-read split alignments and supplementary alig
 
 The highlight example is available in `example/highlight/`:
 
-![Highlight Example](example/highlight/highlight.svg)
+![Highlight Example](example/highlight/highlight_exam/highlight.one.bam.svg)
 
 This mode is designed to show how reads span multiple VCF target sites and to make allele-linkage patterns easier to inspect in a static figure.
 
