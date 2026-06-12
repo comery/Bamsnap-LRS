@@ -6,7 +6,7 @@ is kept only for backward compatibility with old imports/tests that call
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
-from PIL import Image
+# from PIL import Image
 
 from .highlight import HighlightSite
 from .reader import Read
