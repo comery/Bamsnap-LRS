@@ -1,10 +1,6 @@
-# 作用：负责将比对、注释等信息渲染为PNG格式的图片。
-# 通常用于生成高分辨率、适合展示和出版的静态图片。
-# 内部会调用布局、配色等模块，把reads、注释、覆盖度等内容绘制到PNG画布上。
-
 from typing import List, Dict, Optional, Tuple, Any
 
-from PIL import Image, ImageDraw, ImageFont
+# from PIL import Image, ImageDraw, ImageFont
 
 from .layout import (
     segments_to_pixels,
