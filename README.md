@@ -62,7 +62,7 @@ The current version adds two practical extensions for long-read variant visualiz
 ### Requirements
 - Python 3.8+
 - pysam
-- Pillow
+- pyfaidx
 - cairosvg
 
 ### Install from source
