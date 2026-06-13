@@ -1,18 +1,3 @@
-'''
-这个脚本（regions.py）的作用是：解析BED和VCF格式的文件，
-提取出基因组区间（regions），用于批量可视化或分析。
-
-主要功能包括：
-
-解析VCF文件，自动识别结构变异（END、SVLEN等信息），根据变异类型和长度计算区间，
-并支持自定义padding。
-解析BED文件，直接读取每一行的染色体、起止坐标。
-支持.gz压缩文件和普通文本文件。
-输出标准化的区间列表（chrom, start, end），供后续批量处理。
-简言之：这是Bamsnap-LRS的“区间文件解析”模块，能把BED/VCF批量注释文件转为标准区间列表，
-方便批量绘图和分析。
-'''
-
 """Parse BED and VCF files to extract genomic regions"""
 import os
 import gzip
