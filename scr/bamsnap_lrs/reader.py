@@ -1,11 +1,3 @@
-#从BAM/CRAM文件中读取指定基因组区间的测序比对数据，并将其解析为标准化的Read对象列表，供后续可视化和分析使用。
-#主要功能包括：
-#Read数据结构：封装了每条read的基本信息（名称、区间、链向、MAPQ、主/辅/次比对、片段列表、序列等）。
-#fetch_reads：读取DNA测序数据，支持多种过滤（MAPQ、主/辅/次比对）、下采样、MD/CS/参考序列解析等，输出标准化Read对象。
-#fetch_rna_reads：专为RNA测序设计，能自动收集同一转录本的所有拼接片段（包括supplementary），便于展示剪接结构。
-#简言之：比对数据读取与标准化模块，把原始BAM/CRAM比对结果转为统一的结构化对象，方便后续可视化和统计。
-
-
 from dataclasses import dataclass
 from typing import List, Optional
 
