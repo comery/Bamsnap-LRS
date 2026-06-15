@@ -1,8 +1,3 @@
-'''
-作用：负责将同样的信息渲染为SVG格式的矢量图。
-SVG支持缩放不失真，适合网页交互、精细展示和后期编辑。
-支持丰富的可视化细节（如基因注释、BED注释、reads分层、变异高亮、坐标轴、箭头等），并能灵活调整样式和内容。
-'''
 """SVG renderer for bamsnap visualization"""
 from typing import List, Dict, Optional, Any, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
