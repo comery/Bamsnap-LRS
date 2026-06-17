@@ -1445,7 +1445,7 @@ def render_svg_snapshot(
     for track in tracks:
         reads = track['reads']
         if do_hap_sort:
-            # VCF highlight 模式下，为保持 haplotype 排序，每条 read 一行
+            # In VCF highlight mode, one read per row to preserve haplotype sort order
             stacks = list(range(len(reads)))
         else:
             if is_rna:

@@ -11,7 +11,7 @@ class Segment:
     read_consumed: int
     read_seq: Optional[str] = None
 
-##CIGAR 解析 输入：100M5I10D 输出：[(M, 100), (I, 5), (D, 10)]
+# Parse CIGAR string. Input: 100M5I10D, Output: [(M, 100), (I, 5), (D, 10)]
 def parse_cigar_string(cigar: str) -> List[Tuple[str, int]]:
     ops = []
     num = []
@@ -27,7 +27,7 @@ def parse_cigar_string(cigar: str) -> List[Tuple[str, int]]:
         raise ValueError("invalid cigar")
     return ops
 
-##合并相邻、类型和操作符相同的Segment，减少冗余。例如：[(match, =, 10), (match, =, 5)] -> [(match, =, 15)]
+# Merge adjacent segments with the same type and op to reduce redundancy. e.g. [(match, =, 10), (match, =, 5)] -> [(match, =, 15)]
 def merge_segments(segments: List[Segment]) -> List[Segment]:
     if not segments:
         return segments
@@ -46,8 +46,9 @@ def merge_segments(segments: List[Segment]) -> List[Segment]:
             out.append(s)
     return out
 
-##解析MD标签（SAM/BAM中的比对信息，描述错配和缺失），返回操作类型和长度的元组列表。
-##输入：10A5^AC10 输出：[("=", 10), ("X", 1), ("=", 5), ("D", 2), ("=", 10)]
+# Parse MD tag (alignment info from SAM/BAM describing mismatches and deletions).
+# Returns a list of (op, length) tuples.
+# Input: 10A5^AC10, Output: [("=", 10), ("X", 1), ("=", 5), ("D", 2), ("=", 10)]
 def parse_md(md: str) -> List[Tuple[str, int]]:
     res = []
     i = 0
@@ -70,8 +71,9 @@ def parse_md(md: str) -> List[Tuple[str, int]]:
             i += 1
     return res
 
-##解析CS标签（minimap2等工具输出的更详细的比对描述），支持匹配、错配、插入、缺失、剪接等。
-##输入 100*ag+ct-gg 输出：[("=", 100, None), ("X", 1, "g"), ("I", 2, "ct"), ("D", 2, None)]
+# Parse CS tag (detailed alignment from tools like minimap2), supporting match,
+# mismatch, insertion, deletion, splicing, etc.
+# Input: 100*ag+ct-gg, Output: [("=", 100, None), ("X", 1, "g"), ("I", 2, "ct"), ("D", 2, None)]
 def parse_cs(cs: str) -> List[Tuple[str, int, Optional[str]]]:
     res = []
     i = 0
@@ -116,7 +118,8 @@ def parse_cs(cs: str) -> List[Tuple[str, int, Optional[str]]]:
             i += 1
     return res
 
-##综合CIGAR、MD、CS信息，生成Segment列表。优先用CS标签，其次用CIGAR+MD，否则只用CIGAR。
+# Combine CIGAR, MD, and CS info to produce a Segment list. Prefer CS tag,
+# then CIGAR+MD, otherwise fall back to CIGAR alone.
 def from_cigar_md_cs(cigar: str, md: Optional[str] = None, cs: Optional[str] = None) -> List[Segment]:
     ops = parse_cigar_string(cigar)
     out: List[Segment] = []
@@ -175,7 +178,8 @@ def from_cigar_md_cs(cigar: str, md: Optional[str] = None, cs: Optional[str] = N
             raise ValueError("unsupported op")
     return merge_segments(out)
 
-###结合CIGAR字符串、read序列和ref序列，逐碱基比对，生成详细的Segment列表（区分match和mismatch）。
+# Base-by-base alignment using CIGAR string, read sequence, and reference
+# sequence to produce a detailed Segment list (distinguishing match and mismatch).
 def from_cigar_with_ref(cigar: str, read_seq: str, ref_seq: str) -> List[Segment]:
     ops = parse_cigar_string(cigar)
     out: List[Segment] = []

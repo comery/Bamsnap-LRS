@@ -506,7 +506,7 @@ def render_snapshot(
         start,
         end,
         bp_per_px,
-        0,      # default style 这里没有左右 margin
+        0,      # default style has no left/right margin
         width,
     )
 
