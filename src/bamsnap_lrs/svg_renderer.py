@@ -1351,6 +1351,7 @@ def render_svg_snapshot(
     color_by: str = "type",
     ref_seq: Optional[str] = None,
     show_insertion_labels: bool = True,
+    hide_indels=False,
     coverage_max_depth: Optional[int] = None,
     margin: int = 20,  # Left and right margins
     is_rna: bool = False,
@@ -1798,13 +1799,20 @@ def render_svg_snapshot(
                     if svg_highlight_index:
                         pass
                     else:
-                        label = None
-                        if detail == "high" and show_insertion_labels:
-                            seg_idx = rect_to_seg.get(rect_idx)
-                            if seg_idx is not None:
-                                seg = r.segments[seg_idx]
-                                if seg and seg.length > 0:
-                                    label = f"I({seg.length})"
+                        # --hide-indels does not remove the insertion from the read model.
+                        # It only makes the insertion visually look like an ordinary match block.
+                        if hide_indels:
+                            ins_color_hex = MATCH_HEX   # ordinary match/read-body color
+                            label = None                # avoid purple I(length) labels
+                        else:
+                            ins_color_hex = color_hex
+                            label = None
+                            if detail == "high" and show_insertion_labels:
+                                seg_idx = rect_to_seg.get(rect_idx)
+                                if seg_idx is not None:
+                                    seg = r.segments[seg_idx]
+                                    if seg and seg.length > 0:
+                                        label = f"I({seg.length})"
                         # Render insertion as a virtual 1-bp block so its
                         # visual size follows a single-base mismatch rectangle.
                         # segments_to_pixels stores insertion as x0 == x1
@@ -1816,7 +1824,7 @@ def render_svg_snapshot(
                         if ins_x1 <= ins_x0:
                             ins_x0 = max(margin, ins_x0 - one_base_px)
                             ins_x1 = min(width - margin, ins_x0 + one_base_px)
-                        insertion_overlays.append((ins_x0, ins_x1, y, read_height, color_hex, label))
+                        insertion_overlays.append((ins_x0, ins_x1, y, read_height, ins_color_hex, label))
                 elif t == "ref_skip":
                     y_center = y + read_height // 2
                     SubElement(svg, "line", {
