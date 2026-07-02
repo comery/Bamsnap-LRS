@@ -39,6 +39,7 @@ def add_common_args(parser):
     annotation_group = parser.add_mutually_exclusive_group()
     annotation_group.add_argument("-g", "--gff", help="GFF/GTF file path for gene annotation")
     annotation_group.add_argument("--bed", help="BED file path for feature annotation")
+    parser.add_argument("--hide-insertions",action="store_true",help="De-emphasize insertions in the read pileup. Insertions are rendered like normal matches and insertion labels are hidden")
     parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels, [True]")
     parser.add_argument("--no-insertion-labels", dest="show_insertion_labels", action="store_false", help="Hide insertion labels")
     parser.add_argument("--coverage-max-depth", type=int, help="Coverage track maximum depth")
@@ -72,6 +73,7 @@ def _render_svg_content(tracks, args, chrom, start, end, ref_seq, is_rna=False, 
         color_by=args.color_by,
         ref_seq=ref_seq,
         show_insertion_labels=args.show_insertion_labels,
+        hide_indels=getattr(args, "hide_insertions", False),
         coverage_max_depth=args.coverage_max_depth,
         is_rna=is_rna,
         gff_genes=gff_genes,
