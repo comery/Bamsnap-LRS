@@ -167,6 +167,7 @@ Both commands support similar options, with `rna` adding support for splice junc
 | `--show-supp` | Show supplementary alignments. Recommended for SV snapshots. | False |
 | `--show-secondary` | Show secondary alignments. | False |
 | `--show-insertion-labels` | Show insertion length labels. | True |
+| `--hide-insertions` | De-emphasize insertions in the read pileup. Insertions are rendered like normal matches and insertion labels are hidden. | False |
 | `--no-insertion-labels` | Hide insertion length labels. | - |
 | `--show-composition` | Show base composition chart. | False |
 | `--comp-height` | Base composition chart height. | auto |
