@@ -230,7 +230,7 @@ def parse_regions_file(regions_path: str, padding: Optional[int] = None) -> List
     VCF format:
         - Columns: CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO, ...
         - POS is 1-based
-        - Supports standard VCF and VCFv4.3+ formats
+        - Supports standard VCF and VCFv4.2+ formats
         - Handles structural variants with END tag in INFO field
         - Handles SVTYPE and SVLEN for structural variants
         - Calculates region based on REF/ALT lengths
