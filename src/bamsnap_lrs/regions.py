@@ -170,6 +170,9 @@ def _calculate_vcf_target_region(
             except (ValueError, TypeError):
                 pass
 
+        if info.get('SVTYPE')=="INS":
+            end_pos = pos
+            
         if 'END' in info:
             try:
                 end_pos = int(info['END'])
