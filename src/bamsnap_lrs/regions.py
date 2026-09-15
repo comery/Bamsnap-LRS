@@ -105,9 +105,14 @@ def _calculate_vcf_region(chrom: str, pos: int, ref: str, alt: str, info: Option
         if info.get('SVTYPE') and svlen is not None:
             end_pos = pos + abs(svlen)
 
+        if info.get('SVTYPE')=="INS":
+            end_pos = pos
+        
         parsed_end = _first_int(info.get('END'))
         if parsed_end is not None:
             end_pos = parsed_end
+
+        
 
     use_sv_region = False
     if end_pos is not None:
