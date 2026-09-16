@@ -563,59 +563,101 @@ def draw_svg_per_track_coverage(
             if base_end_idx > num_bases:
                 base_end_idx = num_bases
 
-            agg_ref_match = 0
-            agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
-            agg_depth = 0
-            for base_idx in range(base_start_idx, base_end_idx):
-                dist = base_distribution[base_idx]
-                agg_ref_match += dist.get("ref_match", 0)
-                for base in ["A", "C", "G", "T", "N"]:
-                    agg_variants[base] += dist.get(base, 0)
-                agg_depth += dist.get("depth", 0)
+            # All genomic positions represented by this output pixel
+            positions = base_distribution[base_start_idx:base_end_idx]
 
-            num_positions = base_end_idx - base_start_idx
-            if num_positions > 1:
-                agg_ref_match = round(agg_ref_match / num_positions)
-                for base in agg_variants:
-                    if agg_variants[base] > 0:
-                        agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
-                agg_depth = round(agg_depth / num_positions)
-            if agg_depth == 0:
+            if not positions:
                 continue
+
+            # Overall coverage height still represents the average depth
+            # across all genomic positions compressed into this pixel.
+            agg_depth = round(
+                sum(p.get("depth", 0) for p in positions) / len(positions)
+            )
+
+            if agg_depth <= 0:
+                continue
+
+            # Preserve the strongest mismatch signal within this pixel.
+            # This avoids diluting a true single-base variant when several
+            # neighboring reference positions are compressed into one pixel.
+            peak_variant_fraction = 0.0
+
+            for p in positions:
+                depth = p.get("depth", 0)
+
+                if depth <= 0:
+                    continue
+
+                variant_count = sum(
+                    p.get(base, 0)
+                    for base in ["A", "C", "G", "T", "N"]
+                )
+
+                variant_fraction = variant_count / depth
+
+                if variant_fraction > peak_variant_fraction:
+                    peak_variant_fraction = variant_fraction
+
+            # Pool all observed non-reference bases within this pixel.
+            # Their relative proportions determine how the colored part
+            # of the coverage bar is divided among A/C/G/T/N.
+            agg_variants = {
+                base: sum(p.get(base, 0) for p in positions)
+                for base in ["A", "C", "G", "T", "N"]
+            }
 
             draw_x = margin + px
             bar_height = int(coverage_height * min(agg_depth / max_cov, 1.0))
             if bar_height <= 0:
                 continue
 
-            total_count = agg_ref_match + sum(agg_variants.values())
-            if total_count == 0:
-                continue
-
             if detail == "low":
                 SubElement(svg, "rect", {
-                    "x": str(draw_x), "y": str(bar_bottom - bar_height),
-                    "width": "1", "height": str(bar_height), "fill": "#b4b4b4"
+                    "x": str(draw_x),
+                    "y": str(bar_bottom - bar_height),
+                    "width": "1",
+                    "height": str(bar_height),
+                    "fill": "#b4b4b4"
                 })
                 continue
 
-            base_heights = {}
-            if agg_ref_match > 0:
-                base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
-            for base in ["A", "C", "G", "T", "N"]:
-                count = agg_variants[base]
-                if count > 0:
-                    h = int(bar_height * count / total_count)
-                    base_heights[base] = max(1, h) if h == 0 else h
+            total_variant = sum(agg_variants.values())
 
-            total_height_used = sum(base_heights.values())
-            if total_height_used < bar_height and base_heights:
-                max_base = max(base_heights.items(), key=lambda x: x[1])[0]
-                base_heights[max_base] += (bar_height - total_height_used)
-            elif total_height_used > bar_height:
-                excess = total_height_used - bar_height
-                if "ref" in base_heights and base_heights["ref"] > excess:
-                    base_heights["ref"] -= excess
+            base_heights = {}
+
+            if total_variant > 0 and peak_variant_fraction > 0:
+
+                # Total colored height reflects the strongest variant
+                # fraction among genomic positions represented by this pixel.
+                variant_height = (
+                    bar_height
+                    * min(1.0, peak_variant_fraction)
+                )
+
+                # Remaining height is reference-match coverage.
+                ref_height = bar_height - variant_height
+
+                # Divide the colored part according to all variant bases
+                # observed within this pixel. Using floating-point SVG
+                # heights allows several ALT bases to remain visible.
+                for base in ["A", "C", "G", "T", "N"]:
+                    count = agg_variants[base]
+
+                    if count > 0:
+                        base_heights[base] = (
+                            variant_height
+                            * count
+                            / total_variant
+                        )
+
+                if ref_height > 0:
+                    base_heights["ref"] = ref_height
+
+            else:
+                # No mismatch in this pixel: draw the entire coverage
+                # bar as reference-match gray.
+                base_heights["ref"] = float(bar_height)
 
             current_stack_y = bar_bottom
             for base in ["A", "C", "G", "T", "N"]:
