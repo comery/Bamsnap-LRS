@@ -209,8 +209,10 @@ def _calculate_vcf_target_region(
         else:
             # VCF POS and END are 1-based; convert to 0-based half-open for the
             # renderer which uses pysam / 0-based coordinates throughout.
-            target_start = pos - 1
-            target_end = max(end_pos, pos + 1) - 1
+            # target_start = pos - 1
+            # target_end = max(end_pos, pos + 1) - 1
+            target_start = pos 
+            target_end = max(end_pos, pos + 1) 
     else:
         ref_len = len(ref) if ref else 1
         alt_alleles = alt.split(',') if alt else ['']
@@ -327,4 +329,3 @@ def parse_regions_file(regions_path: str, padding: Optional[int] = None) -> List
                     continue
     
     return regions
-
