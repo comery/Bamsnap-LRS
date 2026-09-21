@@ -150,6 +150,50 @@ def render_output(tracks, args, chrom, start, end, ref_seq, is_rna=False, gff_ge
     )
     _write_svg_based_output(svg_content, args.out)
 
+
+def _print_highlight_info():
+    """Print Highlight metric/cluster definitions once per CLI invocation."""
+    print("[HIGHLIGHT-SUMMARY-INFO] Metric definitions:")
+    print(
+        "  total_reads: all reads displayed in this Highlight track after "
+        "the active BAM/read filters and optional Highlight filtering."
+    )
+    print(
+        "  reads_covering_valid_highlight_sites: reads with at least one "
+        "A/C/G/T observation at a highlighted SNV site. A highlighted site "
+        "inside a deletion, ref-skip, or uncovered interval is not valid. "
+        "(Internal counter: valid_site_reads.)"
+    )
+    print(
+        "  h1_reads: valid-site reads with >=1 uniquely assigned phase block "
+        "and all uniquely assigned blocks supporting h1."
+    )
+    print(
+        "  h2_reads: valid-site reads with >=1 uniquely assigned phase block "
+        "and all uniquely assigned blocks supporting h2."
+    )
+    print(
+        "  complex_reads: valid-site reads with uniquely assigned phase "
+        "blocks supporting different haplotypes across blocks "
+        "(for example, PS1->h1 and PS2->h2)."
+    )
+    print(
+        "  unassigned_reads: valid-site reads for which no phase block can "
+        "be uniquely assigned."
+    )
+    print(
+        "  no_valid_site_reads: reads with no A/C/G/T observation at any "
+        "highlighted SNV site; deletion-only Highlight overlap is included "
+        "here."
+    )
+    print(
+        "[HIGHLIGHT-CLUSTER-INFO] Reads are grouped by exact phase-block "
+        "signatures: h1/h2/... = unique block assignment, U = valid "
+        "hap-informative site(s) but no unique block assignment, and . = "
+        "no valid hap-informative site in that block. Missing block states "
+        "are not imputed."
+    )
+
 def add_highlight_args(parser):
     """Add arguments specific to the highlight subcommand.
 
@@ -263,6 +307,7 @@ def main():
     # 'highlight' is a specialised wrapper around the dna/rna pipeline.
     # Translate it into the appropriate cmd so all downstream logic is reused.
     if args.cmd == "highlight":
+        _print_highlight_info()
         args.cmd = getattr(args, "mode", "dna")
         # --highlight-vcf is already set as args.highlight_vcf by argparse.
         # --no-hap-sort / --no-hap-filter are already present from add_highlight_args.
