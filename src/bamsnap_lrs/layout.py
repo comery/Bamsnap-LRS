@@ -16,7 +16,6 @@ class DrawRect:
 def segments_to_pixels(segments: List[Segment], read_start: int, region_start: int, bp_per_px: float, detail: str = "mid") -> List[Tuple[str, int, int]]:
     out: List[Tuple[str, int, int]] = []
     ref_cursor = read_start
-    last_x1 = None  # Track the x1 of the previous segment to avoid overlap
     for s in segments:
         if s.ref_consumed == 0:
             if s.type == "ins":
@@ -24,16 +23,12 @@ def segments_to_pixels(segments: List[Segment], read_start: int, region_start: i
                 out.append(("ins", x, x))
             continue
         x0 = int((ref_cursor - region_start) / bp_per_px)
-        # If the previous segment's x1 is greater than current x0, use x1 as starting point to avoid overlap
-        if last_x1 is not None and last_x1 > x0:
-            x0 = last_x1
         x1 = int((ref_cursor + s.ref_consumed - region_start) / bp_per_px)
         x1 = max(x1, x0 + 1)
         t = s.type
         if detail == "low" and t == "mismatch":
             t = "match"
         out.append((t, x0, x1))
-        last_x1 = x1
         ref_cursor += s.ref_consumed
     return out
 
@@ -53,6 +48,45 @@ def assign_stacks(read_spans: List[Tuple[int, int]], max_stack: int) -> List[int
         else:
             res.append(placed)
     return res
+
+
+def assign_packed_stacks(read_spans: List[Tuple[int, int]]) -> List[int]:
+    """Greedily pack non-overlapping read spans while preserving input priority.
+
+    Unlike ``assign_stacks()``, this helper does not assume that spans arrive in
+    genomic order.  That matters in highlight mode because reads are first
+    sorted by haplotype signature rather than by start coordinate.  The input
+    order therefore determines which reads get first choice of the upper rows,
+    while any later read may reuse an existing row when its genomic interval
+    does not overlap intervals already placed on that row.
+
+    Intervals are treated as half-open [start, end), so touching boundaries do
+    not count as overlap.
+    """
+    rows: List[List[Tuple[int, int]]] = []
+    result: List[int] = []
+
+    for start, end in read_spans:
+        if end < start:
+            start, end = end, start
+
+        placed_row = None
+        for row_idx, occupied in enumerate(rows):
+            overlaps = any(start < occ_end and occ_start < end
+                           for occ_start, occ_end in occupied)
+            if not overlaps:
+                occupied.append((start, end))
+                occupied.sort(key=lambda x: (x[0], x[1]))
+                placed_row = row_idx
+                break
+
+        if placed_row is None:
+            rows.append([(start, end)])
+            placed_row = len(rows) - 1
+
+        result.append(placed_row)
+
+    return result
 
 
 def assign_stacks_grouped(
@@ -152,17 +186,45 @@ def assign_stacks_grouped(
 
     return res
 
+def _query_span_from_segments(read: Any) -> Tuple[int, int]:
+    """Return the alignment span on the original read using terminal CIGAR clips.
+
+    This is used as a robust fallback for split/supplementary alignments. In
+    particular, reverse-strand supplementary records with hard clipping can
+    have misleading query_start/query_end values if those values were derived
+    only from query_alignment_start/query_alignment_end.
+    """
+    segments = getattr(read, "segments", None) or []
+    q_len = int(getattr(read, "query_length", 0) or 0)
+    if not segments or q_len <= 0:
+        return int(getattr(read, "query_start", 0) or 0), int(getattr(read, "query_end", 0) or 0)
+
+    left_clip = 0
+    for s in segments:
+        if s.type not in ("soft", "hard"):
+            break
+        left_clip += int(getattr(s, "length", 0) or 0)
+
+    right_clip = 0
+    for s in reversed(segments):
+        if s.type not in ("soft", "hard"):
+            break
+        right_clip += int(getattr(s, "length", 0) or 0)
+
+    if getattr(read, "reverse", False):
+        q_start, q_end = right_clip, q_len - left_clip
+    else:
+        q_start, q_end = left_clip, q_len - right_clip
+
+    if q_end < q_start:
+        return int(getattr(read, "query_start", 0) or 0), int(getattr(read, "query_end", 0) or 0)
+    return q_start, q_end
+
+
 def query_order_key(read: Any):
-    """
-    Sort alignments by their physical order on the original read.
-    Fallback to genomic coordinates if query coordinates are missing.
-    """
-    return (
-        getattr(read, "query_start", 0),
-        getattr(read, "query_end", 0),
-        read.start,
-        read.end,
-    )
+    """Sort split alignments by their physical order on the original read."""
+    q_start, q_end = _query_span_from_segments(read)
+    return (q_start, q_end, read.start, read.end)
 
 
 def ref_pos_for_query_side(read: Any, side: str) -> int:
