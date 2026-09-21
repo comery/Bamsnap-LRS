@@ -15,7 +15,7 @@ def add_common_args(parser):
     parser.add_argument("--out", help="Output file path (supports .png, .svg, .pdf). Required for single region mode.")
     parser.add_argument("--out-prefix", help="Output prefix for batch mode: outdir/outprefix_ (e.g., results/sample_.svg). Output files will be named: outprefix_chr_start_end.svg")
     parser.add_argument("--padding", type=int, default=None, help="Manually set padding added to both sides of each region from --regions. If omitted, padding is inferred from each BED/VCF record.")
-    parser.add_argument("--max-reads", type=int, default=0, help="Maximum number of reads to display; 0 disables downsampling, [0]")
+    # parser.add_argument("--max-reads", type=int, default=0, help="Maximum number of reads to display; 0 disables downsampling, [0]")
     parser.add_argument("--mapq", type=int, default=0, help="Minimum MAPQ value, [0]")
     parser.add_argument("--show-supp", action="store_true", help="Show supplementary alignments")
     parser.add_argument("--show-secondary", action="store_true", help="Show secondary alignments")
@@ -23,7 +23,7 @@ def add_common_args(parser):
     parser.add_argument("--read-height", type=int, default=6, help="Height of each read (pixels)")
     parser.add_argument("--detail", choices=["low", "mid", "high"], default="mid", help="Detail level, [mid]")
     parser.add_argument("--overview-detail", choices=["hide", "show"], default="hide", help="At broad genomic scales, hide base-level mismatch and small-indel details by default; use show to retain them, [hide]")
-    parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy, [mapq]")
+    # parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy, [mapq]")
     parser.add_argument("--use-md", action="store_true", help="Use MD tag to detect mismatches")
     parser.add_argument("--use-cs", action="store_true", help="Use cs tag to detect mismatches")
     parser.add_argument("--fa", help="Reference genome FASTA file path (required for CRAM files)")
@@ -450,11 +450,9 @@ def process_single_region(args, chrom, start, end):
                     chrom,
                     start,
                     end,
-                    max_reads=args.max_reads,
                     mapq_min=args.mapq,
                     show_supp=args.show_supp,
                     show_secondary=args.show_secondary,
-                    downsample_strategy=args.downsample_strategy,
                     use_md=args.use_md,
                     use_cs=args.use_cs,
                     use_ref=bool(args.fa),
@@ -539,11 +537,9 @@ def process_single_region(args, chrom, start, end):
                     chrom,
                     start,
                     end,
-                    max_reads=args.max_reads,
                     mapq_min=args.mapq,
                     show_supp=args.show_supp,
                     show_secondary=args.show_secondary,
-                    downsample_strategy=args.downsample_strategy,
                     use_md=args.use_md,
                     use_cs=args.use_cs,
                     use_ref=bool(args.fa),
