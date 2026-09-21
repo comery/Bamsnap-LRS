@@ -15,13 +15,14 @@ def add_common_args(parser):
     parser.add_argument("--out", help="Output file path (supports .png, .svg, .pdf). Required for single region mode.")
     parser.add_argument("--out-prefix", help="Output prefix for batch mode: outdir/outprefix_ (e.g., results/sample_.svg). Output files will be named: outprefix_chr_start_end.svg")
     parser.add_argument("--padding", type=int, default=None, help="Manually set padding added to both sides of each region from --regions. If omitted, padding is inferred from each BED/VCF record.")
-    parser.add_argument("--max-reads", type=int, default=300, help="Maximum number of reads to display, [300]")
+    parser.add_argument("--max-reads", type=int, default=0, help="Maximum number of reads to display; 0 disables downsampling, [0]")
     parser.add_argument("--mapq", type=int, default=0, help="Minimum MAPQ value, [0]")
     parser.add_argument("--show-supp", action="store_true", help="Show supplementary alignments")
     parser.add_argument("--show-secondary", action="store_true", help="Show secondary alignments")
     parser.add_argument("--width", type=int, default=1200, help="Image width (pixels), [1200]")
     parser.add_argument("--read-height", type=int, default=6, help="Height of each read (pixels)")
     parser.add_argument("--detail", choices=["low", "mid", "high"], default="mid", help="Detail level, [mid]")
+    parser.add_argument("--overview-detail", choices=["hide", "show"], default="hide", help="At broad genomic scales, hide base-level mismatch and small-indel details by default; use show to retain them, [hide]")
     parser.add_argument("--downsample-strategy", choices=["mapq", "first"], default="mapq", help="Downsampling strategy, [mapq]")
     parser.add_argument("--use-md", action="store_true", help="Use MD tag to detect mismatches")
     parser.add_argument("--use-cs", action="store_true", help="Use cs tag to detect mismatches")
@@ -39,6 +40,12 @@ def add_common_args(parser):
     annotation_group = parser.add_mutually_exclusive_group()
     annotation_group.add_argument("-g", "--gff", help="GFF/GTF file path for gene annotation")
     annotation_group.add_argument("--bed", help="BED file path for feature annotation")
+    parser.add_argument(
+        "--gff-display",
+        choices=["gene", "transcript"],
+        default="gene",
+        help="Display GFF/GTF annotations as collapsed gene models or individual transcript models, [gene]",
+    )
     parser.add_argument("--hide-insertions",action="store_true",help="De-emphasize insertions in the read pileup. Insertions are rendered like normal matches and insertion labels are hidden")
     parser.add_argument("--show-insertion-labels", action="store_true", default=True, help="Show insertion labels, [True]")
     parser.add_argument("--no-insertion-labels", dest="show_insertion_labels", action="store_false", help="Hide insertion labels")
@@ -63,6 +70,7 @@ def _render_svg_content(tracks, args, chrom, start, end, ref_seq, is_rna=False, 
         width=args.width,
         read_height=args.read_height,
         detail=args.detail,
+        overview_detail=getattr(args, "overview_detail", "hide"),
         show_axis=args.show_axis,
         show_coverage=args.show_coverage,
         coverage_height=args.coverage_height,
@@ -77,11 +85,13 @@ def _render_svg_content(tracks, args, chrom, start, end, ref_seq, is_rna=False, 
         coverage_max_depth=args.coverage_max_depth,
         is_rna=is_rna,
         gff_genes=gff_genes,
+        gff_display=getattr(args, "gff_display", "gene"),
         bed_features=bed_features,
         highlight_sites=highlight_sites,
         highlight_samples=highlight_samples,
         no_hap_sort=getattr(args, "no_hap_sort", False),
         no_hap_filter=getattr(args, "no_hap_filter", False),
+        hap_layout=getattr(args, "hap_layout", "packed"),
         focus_region=getattr(args, "focus_region", None),
     )
 
@@ -172,13 +182,19 @@ def add_highlight_args(parser):
     # --- Hap-sort / hap-filter overrides (defined here, not in add_common_args) -
     parser.add_argument(
         "--no-hap-sort", action="store_true",
-        help="Do NOT sort/cluster reads by their observed haplotype signature. "
-             "Keeps the default coordinate-based stacking.",
+        help="Do NOT cluster/order reads by compatible observed SNP patterns at "
+             "jointly covered highlight sites. Keeps the default coordinate-based stacking.",
     )
     parser.add_argument(
         "--no-hap-filter", action="store_true",
         help="Do NOT hide reads that don't overlap any VCF site. By default "
              "such reads are hidden to reduce visual clutter.",
+    )
+    parser.add_argument(
+        "--hap-layout", choices=["packed", "row"], default="packed",
+        help="Read layout after shared-SNP pattern clustering: 'packed' packs "
+             "non-overlapping reads within each local pattern cluster; 'row' keeps "
+             "one alignment per row while preserving cluster order, [packed].",
     )
 
     # --- Common arguments (shared with dna/rna, skips the highlight-specific ones) -
@@ -192,6 +208,7 @@ def add_highlight_args(parser):
         show_axis=True,
         no_hap_sort=False,
         no_hap_filter=False,
+        hap_layout="packed",
     )
 
 
@@ -228,7 +245,8 @@ def main():
             "    SNP-linkage patterns stand out.\n"
             "  • Reads that do not overlap any VCF site are hidden by default\n"
             "    (use --no-hap-filter to keep them).\n"
-            "  • Reads are sorted by their observed haplotype signature\n"
+            "  • Reads are clustered by compatible SNP patterns at jointly\n"
+            "    covered sites; uncovered sites do not drive clustering\n"
             "    (use --no-hap-sort to disable).\n"
             "  • Defaults to detail=high and --show-axis.\n"
             "  • Supports both DNA (default) and RNA (--mode rna) data.\n"
