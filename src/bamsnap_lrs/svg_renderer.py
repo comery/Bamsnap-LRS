@@ -27,6 +27,12 @@ MATCH_HEX = "#c3c3c3"
 # different gray #c8c8c8, which made non-target mismatches stand out.)
 MUTED_MISMATCH_HEX = MATCH_HEX
 
+# In Highlight mode, if a highlighted SNP position falls inside a deletion
+# on a read, draw only that SNP-width cell in dark gray.  The deleted site is
+# visible, but it is NOT treated as a valid A/C/G/T observation for haplotype
+# assignment or summary statistics.
+HIGHLIGHT_DELETION_HEX = "#5a5a5a"
+
 
 # ----------------------------------------------------------------------------
 # Phasing-block backdrop colors (feature: colored hap backdrops)
@@ -267,6 +273,112 @@ def _read_base_at_pos(read: Read, pos: int) -> Optional[str]:
     return None
 
 
+
+def _read_observation_at_pos(read: Read, pos: int) -> Tuple[str, Optional[str]]:
+    """Return the read observation at reference position `pos` (0-based).
+
+    Returns:
+        ("base", "A"/"C"/"G"/"T"/other)  : a query base is aligned here
+        ("del", None)                    : the position is inside a deletion
+        ("ref_skip", None)               : the position is inside an N/ref-skip
+        ("uncovered", None)              : the read does not provide an aligned
+                                           observation at this reference base
+
+    Highlight-mode deletion cells are drawn from this state.  Only A/C/G/T
+    observations are considered valid sites for read-level summary statistics
+    and haplotype matching.
+    """
+    if pos < read.start or pos >= read.end:
+        return "uncovered", None
+
+    ref_cur = read.start
+    read_cur = 0
+
+    for s in read.segments:
+        if s.ref_consumed > 0 and s.read_consumed > 0:
+            if ref_cur <= pos < ref_cur + s.ref_consumed:
+                if not read.seq:
+                    return "uncovered", None
+                idx = read_cur + (pos - ref_cur)
+                if 0 <= idx < len(read.seq):
+                    return "base", read.seq[idx].upper()
+                return "uncovered", None
+
+        elif s.ref_consumed > 0 and s.read_consumed == 0:
+            if ref_cur <= pos < ref_cur + s.ref_consumed:
+                if s.type == "del":
+                    return "del", None
+                if s.type == "ref_skip":
+                    return "ref_skip", None
+                return "uncovered", None
+
+        ref_cur += s.ref_consumed
+        read_cur += s.read_consumed
+
+    return "uncovered", None
+
+
+def _classify_highlight_read(
+    read: Read,
+    valid_site_positions: List[int],
+    phase_blocks: List[Dict[str, Any]],
+) -> str:
+    """Classify one read for the per-track Highlight summary.
+
+    Categories are mutually exclusive:
+
+      no_valid_site
+          The read has no A/C/G/T observation at any highlighted site.
+          A highlighted position that falls in a deletion does NOT count.
+
+      h1 / h2
+          At least one phase block is uniquely assigned, and every uniquely
+          assigned block supports the same haplotype.  Blocks that are
+          unassigned because of conflict/ambiguity do not overturn an otherwise
+          consistent h1/h2 classification.
+
+      complex
+          The read spans multiple assignable phase blocks and those blocks
+          support different haplotypes (e.g. PS1 -> h1, PS2 -> h2).  A uniquely
+          assigned haplotype index other than h1/h2 is also reported here.
+
+      unassigned
+          The read has at least one valid highlighted A/C/G/T site but no phase
+          block can be uniquely assigned.
+    """
+    has_valid_site = False
+    for pos in valid_site_positions:
+        if pos < read.start:
+            continue
+        if pos >= read.end:
+            break
+        state, base = _read_observation_at_pos(read, pos)
+        if state == "base" and base in ("A", "C", "G", "T"):
+            has_valid_site = True
+            break
+
+    if not has_valid_site:
+        return "no_valid_site"
+
+    assigned_haps = set()
+    for block in phase_blocks:
+        hap = _read_matched_hap(read, block)
+        if hap is not None:
+            assigned_haps.add(hap)
+
+    if not assigned_haps:
+        return "unassigned"
+
+    if len(assigned_haps) > 1:
+        return "complex"
+
+    only_hap = next(iter(assigned_haps))
+    if only_hap == 0:
+        return "h1"
+    if only_hap == 1:
+        return "h2"
+    return "complex"
+
 def _hap_signature(read: Read, site_positions: List[int]) -> str:
     """Build a display/debug signature over highlighted VCF sites.
 
@@ -298,220 +410,178 @@ def _highlight_read_profile(read: Read, site_positions: List[int]) -> Dict[int, 
     return profile
 
 
-def _cluster_reads_by_shared_sites(
+def _read_block_hap_state(read: Read, block: Dict[str, Any]) -> str:
+    """Return this read's state for one phased block.
+
+    States:
+      h1, h2, h3, ... : uniquely assigned haplotype within this PS block
+      U               : >=1 valid hap-informative A/C/G/T observation exists,
+                        but the block cannot be uniquely assigned
+      .               : no valid hap-informative A/C/G/T observation in block
+
+    A highlighted position covered by a deletion/ref-skip is not a valid site
+    for haplotype assignment and therefore does not by itself change "." to U.
+    """
+    has_valid_informative_site = False
+
+    for pos in block["positions"]:
+        bases = block["hap_bases"].get(pos)
+        if not bases:
+            continue
+
+        present = [b for b in bases if b is not None]
+        if len(set(present)) <= 1:
+            continue
+
+        state, base = _read_observation_at_pos(read, pos)
+        if state == "base" and base in ("A", "C", "G", "T"):
+            has_valid_informative_site = True
+            break
+
+    if not has_valid_informative_site:
+        return "."
+
+    hap = _read_matched_hap(read, block)
+    if hap is None:
+        return "U"
+
+    return f"h{hap + 1}"
+
+
+def _read_phase_signature(
+    read: Read,
+    phase_blocks: List[Dict[str, Any]],
+) -> Tuple[str, ...]:
+    """Return the exact block-wise haplotype signature for one read.
+
+    Example:
+        ("h1", "h2", ".")
+    means:
+        block1 -> h1
+        block2 -> h2
+        block3 -> no valid hap-informative observation
+
+    Missing block information is never imputed.
+    """
+    return tuple(
+        _read_block_hap_state(read, block)
+        for block in phase_blocks
+    )
+
+
+def _phase_signature_display(
+    signature: Tuple[str, ...],
+    phase_blocks: List[Dict[str, Any]],
+) -> str:
+    """Human-readable signature such as PS1:h1|PS2:h2|PS3:."""
+    if not phase_blocks:
+        return "NO_PHASE_BLOCK"
+
+    parts = []
+    for block, state in zip(phase_blocks, signature):
+        parts.append(f"PS{block['ps_id']}:{state}")
+    return "|".join(parts)
+
+
+def _phase_state_sort_key(state: str):
+    """Deterministic visual order: h1, h2, h3..., U, then missing (.)."""
+    if state.startswith("h") and state[1:].isdigit():
+        return (0, int(state[1:]))
+    if state == "U":
+        return (1, 0)
+    if state == ".":
+        return (2, 0)
+    return (3, str(state))
+
+
+def _cluster_reads_by_phase_signature(
     reads: List[Read],
-    site_positions: List[int],
-) -> List[List[int]]:
-    """Cluster reads by compatible SNP patterns on *jointly covered* sites.
+    phase_blocks: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Group reads by exact phase-block haplotype signature.
 
-    This is deliberately not a global h1/h2 assignment.  Different VCF phase
-    sets can use independent haplotype numbering, so the read layout should not
-    assume that h1 in one PS block is globally equivalent to h1 in another.
+    Reads are placed in the same cluster only when their full signatures are
+    identical.  For example:
 
-    Clustering rules:
-      * Only A/C/G/T observations at highlighted sites are compared.
-      * Missing / uncovered positions do not contribute to similarity.
-      * A read may join a cluster when it shares at least one called site with
-        that cluster and has no conflicting base on any shared called site.
-      * Among compatible clusters, the cluster with the greatest number of
-        jointly called sites is preferred.
-      * Reads with no callable highlighted base are kept in a final
-        uninformative cluster rather than being assigned to a haplotype group.
+        PS1:h1 | PS2:h2    -> one cluster
+        PS1:h1 | PS2:h1    -> a different cluster
+        PS1:h1 | PS2:.     -> a different cluster
 
-    More informative reads are used as seeds first.  Each cluster stores the
-    union of compatible observed alleles, so partially overlapping reads can
-    link a local SNP pattern across the region without ``?`` driving the result.
+    There is deliberately no compatibility/bridge merge and no inference for
+    blocks represented by ".".
     """
     if not reads:
         return []
 
-    profiles = [_highlight_read_profile(r, site_positions) for r in reads]
+    grouped: Dict[Tuple[str, ...], List[int]] = {}
+    for idx, read in enumerate(reads):
+        signature = _read_phase_signature(read, phase_blocks)
+        grouped.setdefault(signature, []).append(idx)
 
-    # Seed with reads that cover the most highlighted sites.  This makes the
-    # cluster pattern as informative as possible before shorter/partial reads
-    # are assigned, reducing dependence on BAM/read order.
-    seed_order = sorted(
-        range(len(reads)),
-        key=lambda i: (
-            -len(profiles[i]),
-            reads[i].start,
-            reads[i].end,
-            reads[i].qname,
-        ),
-    )
+    def cluster_sort_key(item):
+        signature, members = item
+        signature_key = tuple(_phase_state_sort_key(s) for s in signature)
+        left = min(reads[i].start for i in members) if members else 0
+        return (
+            signature_key,
+            -len(members),
+            left,
+            signature,
+        )
 
     clusters: List[Dict[str, Any]] = []
-    uninformative: List[int] = []
+    for signature, members in sorted(grouped.items(), key=cluster_sort_key):
+        clusters.append({
+            "signature": signature,
+            "display_signature": _phase_signature_display(signature, phase_blocks),
+            "members": list(members),
+        })
 
-    for idx in seed_order:
-        profile = profiles[idx]
-        if not profile:
-            uninformative.append(idx)
-            continue
-
-        best_cluster = None
-        best_score = None
-
-        for cluster_idx, cluster in enumerate(clusters):
-            pattern: Dict[int, str] = cluster["pattern"]
-            shared = 0
-            conflict = False
-
-            for site_idx, base in profile.items():
-                cluster_base = pattern.get(site_idx)
-                if cluster_base is None:
-                    continue
-                shared += 1
-                if cluster_base != base:
-                    conflict = True
-                    break
-
-            if conflict or shared == 0:
-                continue
-
-            # Prefer the cluster with the strongest directly observed overlap.
-            # Cluster size is a deterministic secondary criterion.
-            score = (shared, len(cluster["members"]), -cluster_idx)
-            if best_score is None or score > best_score:
-                best_score = score
-                best_cluster = cluster_idx
-
-        if best_cluster is None:
-            clusters.append({
-                "pattern": dict(profile),
-                "members": [idx],
-            })
-            continue
-
-        cluster = clusters[best_cluster]
-        cluster["members"].append(idx)
-        pattern = cluster["pattern"]
-        for site_idx, base in profile.items():
-            if site_idx not in pattern:
-                pattern[site_idx] = base
-
-    # The first greedy pass can leave two compatible local patterns separate
-    # when a later partial read bridges them.  Merge compatible clusters
-    # iteratively so read-supported linkage can propagate across the region.
-    #
-    # Example:
-    #   cluster A: S1=A, S2=C
-    #   bridge:    S2=C, S3=G
-    #   cluster B:       S3=G, S4=T
-    # After the bridge joins A, A and B share S3=G and should become one
-    # cluster.  We repeatedly choose the compatible pair with the strongest
-    # directly shared evidence until no further merge is possible.
-    while True:
-        best_pair = None
-        best_score = None
-
-        for i in range(len(clusters)):
-            pattern_i: Dict[int, str] = clusters[i]["pattern"]
-            for j in range(i + 1, len(clusters)):
-                pattern_j: Dict[int, str] = clusters[j]["pattern"]
-                shared = 0
-                conflict = False
-
-                # Iterate over the smaller pattern for efficiency.
-                if len(pattern_i) <= len(pattern_j):
-                    smaller, larger = pattern_i, pattern_j
-                else:
-                    smaller, larger = pattern_j, pattern_i
-
-                for site_idx, base in smaller.items():
-                    other_base = larger.get(site_idx)
-                    if other_base is None:
-                        continue
-                    shared += 1
-                    if other_base != base:
-                        conflict = True
-                        break
-
-                # A merge requires direct read-supported linkage: at least one
-                # jointly called SNP and zero conflicts on all jointly called
-                # SNPs.  Merely having no conflict because the clusters do not
-                # overlap is not enough.
-                if conflict or shared == 0:
-                    continue
-
-                combined_members = len(clusters[i]["members"]) + len(clusters[j]["members"])
-                combined_pattern_sites = len(set(pattern_i) | set(pattern_j))
-                # Prefer the pair with the strongest shared SNP evidence, then
-                # the larger combined group / pattern.  Final terms make the
-                # choice deterministic when scores tie.
-                score = (
-                    shared,
-                    combined_members,
-                    combined_pattern_sites,
-                    -i,
-                    -j,
-                )
-                if best_score is None or score > best_score:
-                    best_score = score
-                    best_pair = (i, j)
-
-        if best_pair is None:
-            break
-
-        i, j = best_pair
-        keep = clusters[i]
-        drop = clusters[j]
-
-        # Compatibility was checked above, so unioning the patterns cannot
-        # overwrite a called site with a different allele.
-        for site_idx, base in drop["pattern"].items():
-            if site_idx not in keep["pattern"]:
-                keep["pattern"][site_idx] = base
-        keep["members"].extend(drop["members"])
-        del clusters[j]
-
-    # Put the most informative local linkage patterns first, then larger groups,
-    # then use genomic position for stable deterministic ordering.  This is only
-    # a visual ordering; clusters are intentionally not labelled h1/h2.
-    def _cluster_sort_key(cluster):
-        members = cluster["members"]
-        left = min(reads[i].start for i in members) if members else 0
-        pattern_items = tuple(sorted(cluster["pattern"].items()))
-        return (-len(cluster["pattern"]), -len(members), left, pattern_items)
-
-    clusters.sort(key=_cluster_sort_key)
-    result = [list(cluster["members"]) for cluster in clusters]
-
-    if uninformative:
-        uninformative.sort(key=lambda i: (reads[i].start, reads[i].end, reads[i].qname))
-        result.append(uninformative)
-
-    return result
+    return clusters
 
 
 def _clustered_highlight_read_layout(
     reads: List[Read],
-    site_positions: List[int],
+    phase_blocks: List[Dict[str, Any]],
     region_start: int,
     region_end: int,
     hap_layout: str,
 ) -> Tuple[List[Read], List[int]]:
-    """Order highlight reads by local SNP-pattern clusters and assign rows.
+    """Order Highlight reads by exact phase-block signature.
 
-    ``packed`` (default) packs non-overlapping reads *within each cluster*.
-    Separate clusters occupy separate row bands but receive no h1/h2 labels.
-    ``row`` preserves the same cluster ordering while using one row per
-    alignment.
+    Each distinct block-wise signature occupies its own row band.  Within a
+    signature cluster, reads are packed by genomic span when `hap_layout` is
+    "packed", or shown one alignment per row when `hap_layout` is "row".
+
+    If no phased blocks are available, reads fall back to one ordinary packed
+    group rather than using the old shared-SNP clustering algorithm.
     """
-    clusters = _cluster_reads_by_shared_sites(reads, site_positions)
-    if not clusters:
-        return list(reads), []
+    if not reads:
+        return [], []
+
+    if phase_blocks:
+        clusters = _cluster_reads_by_phase_signature(reads, phase_blocks)
+    else:
+        clusters = [{
+            "signature": tuple(),
+            "display_signature": "NO_PHASE_BLOCK",
+            "members": list(range(len(reads))),
+        }]
 
     ordered_reads: List[Read] = []
     stacks: List[int] = []
     row_offset = 0
 
-    for members in clusters:
-        # Coordinate order inside a local SNP-pattern cluster gives compact and
-        # predictable packing while retaining cluster contiguity.
+    for cluster in clusters:
+        members = cluster["members"]
+
         members_sorted = sorted(
             members,
-            key=lambda i: (reads[i].start, reads[i].end, reads[i].qname),
+            key=lambda i: (
+                reads[i].start,
+                reads[i].end,
+                reads[i].qname,
+            ),
         )
         cluster_reads = [reads[i] for i in members_sorted]
 
@@ -529,6 +599,7 @@ def _clustered_highlight_read_layout(
 
         ordered_reads.extend(cluster_reads)
         stacks.extend(row_offset + stack for stack in local_stacks)
+
         if local_stacks:
             row_offset += max(local_stacks) + 1
 
@@ -1852,11 +1923,24 @@ def render_svg_snapshot(
         vcf_track_h = _svg_vcf_highlight_track_height_rows(rows_per_sample)
         total_height += vcf_track_h
 
-    # When highlight is active:
+    # Build phase blocks before read clustering.  The same block definitions
+    # are reused later for read backdrops and Highlight summary statistics.
+    read_hap_blocks_by_sample: Dict[str, List[Dict[str, Any]]] = {}
+    if highlight_sites and highlight_samples:
+        for _sname in highlight_samples:
+            _blocks = _phase_blocks_for_sample(
+                highlight_sites,
+                _sname,
+                highlight_samples,
+            )
+            if _blocks:
+                read_hap_blocks_by_sample[_sname] = _blocks
+
+    # When Highlight mode is active:
     #   - filter reads that don't cover any VCF site (unless --no-hap-filter)
-    #   - cluster/order reads using only SNP bases observed at jointly covered
-    #     highlight sites (unless --no-hap-sort). Missing positions do not drive
-    #     the clustering, and VCF h1/h2 labels are not used for read grouping.
+    #   - cluster/order reads by their exact phase-block haplotype signatures
+    #     (unless --no-hap-sort).  Each PS block is independently classified as
+    #     h1/h2/.../U/. and missing block information is never imputed.
     do_hap_sort = bool(highlight_sites) and not no_hap_sort
     do_hap_filter = bool(highlight_sites) and not no_hap_filter
     site_positions: List[int] = []
@@ -1886,9 +1970,28 @@ def render_svg_snapshot(
 
     for track in tracks:
         reads = track['reads']
+        track_title = track.get('title', 'Reads')
+
+        track_phase_blocks: List[Dict[str, Any]] = []
+        if read_hap_blocks_by_sample and highlight_sites and highlight_samples:
+            _track_sample = _highlight_sample_for_track(
+                track_title,
+                highlight_sites,
+                highlight_samples,
+            )
+            if _track_sample:
+                track_phase_blocks = read_hap_blocks_by_sample.get(
+                    _track_sample,
+                    [],
+                )
+
         if do_hap_sort:
             reads, stacks = _clustered_highlight_read_layout(
-                reads, site_positions, start, end, hap_layout
+                reads,
+                track_phase_blocks,
+                start,
+                end,
+                hap_layout,
             )
             track['reads'] = reads
         else:
@@ -1899,7 +2002,11 @@ def render_svg_snapshot(
             else:
                 stacks = assign_split_read_stacks(reads, start, end)
 
-        row_offsets, reads_area_h = _stack_row_offsets(stacks, reads, read_height)
+        row_offsets, reads_area_h = _stack_row_offsets(
+            stacks,
+            reads,
+            read_height,
+        )
 
         track_h = per_track_coverage_h + 15 + reads_area_h + 5
         total_height += track_h
@@ -1907,7 +2014,8 @@ def render_svg_snapshot(
         track_meta.append({
             'stacks': stacks,
             'row_offsets': row_offsets,
-            'reads_area_h': reads_area_h
+            'reads_area_h': reads_area_h,
+            'phase_blocks': track_phase_blocks,
         })
 
     # Create SVG root element
@@ -2100,22 +2208,18 @@ def render_svg_snapshot(
     # Pos -> HighlightSite index; empty when no highlight VCF is active
     # (preserves original full-color mismatch behavior).
     svg_highlight_index = {}
+    svg_highlight_snv_positions: List[int] = []
     if highlight_sites:
         svg_highlight_index = {s.pos: s for s in highlight_sites}
+        svg_highlight_snv_positions = sorted(
+            s.pos for s in highlight_sites if s.is_snv
+        )
 
     # At broad scales, hide base-level noise but keep alignment geometry, large D, N and supplementary styling.
     auto_simplify = bp_per_px > AUTO_SIMPLIFY_BP_PER_PX and not svg_highlight_index and overview_detail != "show"
 
-    # Phase blocks (with assigned backdrop colors) by VCF sample. Used to tint
-    # read rows that uniquely match a hap pattern. For multi-sample VCFs, a BAM
-    # track whose title matches a VCF sample uses that sample's block color;
-    # otherwise we fall back to the first phased sample, preserving old behavior.
-    read_hap_blocks_by_sample: Dict[str, List[Dict[str, Any]]] = {}
-    if highlight_sites and highlight_samples:
-        for _sname in highlight_samples:
-            _blocks = _phase_blocks_for_sample(highlight_sites, _sname, highlight_samples)
-            if _blocks:
-                read_hap_blocks_by_sample[_sname] = _blocks
+    # Phase blocks were constructed before read layout so the exact same
+    # block definitions drive clustering, read backdrops, and summary metrics.
 
     # Iterate over tracks
     for i, track in enumerate(tracks):
@@ -2156,13 +2260,48 @@ def render_svg_snapshot(
         header_text.text = track_title
         current_y += 15
 
-        # Draw reads
+        # Draw reads.  Reuse exactly the phase blocks that were used when
+        # computing this track's phase-signature clusters.
         reads_start_y = current_y
-        read_hap_blocks: List[Dict[str, Any]] = []
-        if read_hap_blocks_by_sample and highlight_sites and highlight_samples:
-            _track_sample = _highlight_sample_for_track(track_title, highlight_sites, highlight_samples)
-            if _track_sample:
-                read_hap_blocks = read_hap_blocks_by_sample.get(_track_sample, [])
+        read_hap_blocks: List[Dict[str, Any]] = meta.get('phase_blocks', [])
+
+        # Per-track Highlight summary.  Categories are mutually exclusive, so:
+        # h1 + h2 + complex + unassigned + no_valid_site == total_reads.
+        if highlight_sites and highlight_samples:
+            summary_counts = {
+                "h1": 0,
+                "h2": 0,
+                "complex": 0,
+                "unassigned": 0,
+                "no_valid_site": 0,
+            }
+
+            # `valid_site_reads` is the internal counter requested for reads
+            # that have >=1 valid A/C/G/T Highlight observation.
+            valid_site_reads = 0
+
+            for _summary_read in reads:
+                _category = _classify_highlight_read(
+                    _summary_read,
+                    svg_highlight_snv_positions,
+                    read_hap_blocks,
+                )
+                summary_counts[_category] += 1
+                if _category != "no_valid_site":
+                    valid_site_reads += 1
+
+            print(
+                f"[HIGHLIGHT-SUMMARY] "
+                f"track={track_title!r} "
+                f"region={chrom}:{start}-{end} "
+                f"total_reads={len(reads)} "
+                f"reads_covering_valid_highlight_sites={valid_site_reads} "
+                f"h1_reads={summary_counts['h1']} "
+                f"h2_reads={summary_counts['h2']} "
+                f"complex_reads={summary_counts['complex']} "
+                f"unassigned_reads={summary_counts['unassigned']} "
+                f"no_valid_site_reads={summary_counts['no_valid_site']}"
+            )
 
         groups: Dict[str, List[int]] = {}
         for idx_r, r in enumerate(reads):
@@ -2419,31 +2558,9 @@ def render_svg_snapshot(
                                     "width": str(gx1 - gx0), "height": str(read_height),
                                     "fill": MUTED_MISMATCH_HEX, "stroke": "none"
                                 })
-                        if r.seq and rect_idx in rect_to_seg:
-                            seg_idx = rect_to_seg[rect_idx]
-                            seg = r.segments[seg_idx]
-                            ref_pos0 = r.start + sum(
-                                s.ref_consumed for s in r.segments[:seg_idx]
-                            )
-                            read_pos0 = sum(s.read_consumed for s in r.segments[:seg_idx])
-                            for k in range(seg.length):
-                                ref_p = ref_pos0 + k
-                                if ref_p not in svg_highlight_index:
-                                    continue
-                                rk = read_pos0 + k
-                                if rk >= len(r.seq):
-                                    continue
-                                base = r.seq[rk].upper()
-                                col = MISMATCH_COLORS.get(base, (200, 60, 60))
-                                bx0 = margin + int((ref_p - start) / bp_per_px)
-                                bx1 = margin + int((ref_p + 1 - start) / bp_per_px)
-                                if bx1 <= bx0:
-                                    bx1 = bx0 + 1
-                                bx0 = max(margin, min(width - margin, bx0))
-                                bx1 = max(margin, min(width - margin, bx1))
-                                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
-                                    bx0, y, bx1 - bx0, read_height, rgb_to_hex(col), supp_opacity
-                                ))
+                        # Highlight SNP/deletion cells are deliberately
+                        # drawn once, after the full read body, so later gray
+                        # match/mismatch rectangles cannot cover them.
                 else:
                     if t == "match":
                         # First paint the whole match block in muted gray,
@@ -2465,31 +2582,9 @@ def render_svg_snapshot(
                                     "width": str(gx1 - gx0), "height": str(read_height),
                                     "fill": "#c3c3c3", "stroke": "none"
                                 })
-                        if svg_highlight_index and r.seq and rect_idx in rect_to_seg:
-                            seg_idx = rect_to_seg[rect_idx]
-                            seg = r.segments[seg_idx]
-                            ref_pos0 = r.start + sum(
-                                s.ref_consumed for s in r.segments[:seg_idx]
-                            )
-                            read_pos0 = sum(s.read_consumed for s in r.segments[:seg_idx])
-                            for k in range(seg.length):
-                                ref_p = ref_pos0 + k
-                                if ref_p not in svg_highlight_index:
-                                    continue
-                                rk = read_pos0 + k
-                                if rk >= len(r.seq):
-                                    continue
-                                base = r.seq[rk].upper()
-                                col = MISMATCH_COLORS.get(base, (150, 150, 150))
-                                bx0 = margin + int((ref_p - start) / bp_per_px)
-                                bx1 = margin + int((ref_p + 1 - start) / bp_per_px)
-                                if bx1 <= bx0:
-                                    bx1 = bx0 + 1
-                                bx0 = max(margin, min(width - margin, bx0))
-                                bx1 = max(margin, min(width - margin, bx1))
-                                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
-                                    bx0, y, bx1 - bx0, read_height, rgb_to_hex(col), supp_opacity
-                                ))
+                        # Highlight SNP/deletion cells are deliberately
+                        # drawn once, after the full read body, so later gray
+                        # match/mismatch rectangles cannot cover them.
                     else:
                         if supp_style and t in ("match", "soft", "hard"):
                             fill_rgb, fill_opacity = supp_style
@@ -2576,6 +2671,49 @@ def render_svg_snapshot(
                     if supp_opacity is not None and supp_opacity < 0.999:
                         arrow_attrs["fill-opacity"] = f"{supp_opacity:.3f}"
                     SubElement(svg, "polygon", arrow_attrs)
+
+            # Highlight overlays are drawn LAST for each read.  This guarantees
+            # that gray match/mismatch/deletion body rectangles cannot cover
+            # colored SNP cells.  If a highlighted SNP falls inside a deletion,
+            # only that SNP-width cell is drawn in dark gray.
+            if svg_highlight_index and svg_highlight_snv_positions:
+                for ref_p in svg_highlight_snv_positions:
+                    if ref_p < r.start:
+                        continue
+                    if ref_p >= r.end:
+                        break
+
+                    obs_state, obs_base = _read_observation_at_pos(r, ref_p)
+
+                    overlay_fill = None
+                    if obs_state == "base" and obs_base in ("A", "C", "G", "T"):
+                        overlay_fill = rgb_to_hex(
+                            MISMATCH_COLORS.get(obs_base, (150, 150, 150))
+                        )
+                    elif obs_state == "del":
+                        overlay_fill = HIGHLIGHT_DELETION_HEX
+
+                    if overlay_fill is None:
+                        continue
+
+                    bx0 = margin + int((ref_p - start) / bp_per_px)
+                    bx1 = margin + int((ref_p + 1 - start) / bp_per_px)
+                    if bx1 <= bx0:
+                        bx1 = bx0 + 1
+
+                    bx0 = max(margin, min(width - margin, bx0))
+                    bx1 = max(margin, min(width - margin, bx1))
+                    if bx1 <= bx0:
+                        continue
+
+                    SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                        bx0,
+                        y,
+                        bx1 - bx0,
+                        read_height,
+                        overlay_fill,
+                        supp_opacity,
+                    ))
 
         # Connect segments
         if is_rna:
