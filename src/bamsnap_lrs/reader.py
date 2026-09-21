@@ -64,11 +64,9 @@ def fetch_reads(
     chrom: str,
     start: int,
     end: int,
-    max_reads: int = 0,
     mapq_min: int = 0,
     show_supp: bool = True,
     show_secondary: bool = False,
-    downsample_strategy: str = "mapq",
     use_md: bool = False,
     use_cs: bool = True,
     use_ref: bool = False,
@@ -136,14 +134,6 @@ def fetch_reads(
                     query_length=q_len,
                 )
             )
-    # Apply the read limit only after scanning the complete region.
-    # This avoids making the retained set depend on BAM fetch order.
-    if max_reads > 0 and len(reads) > max_reads:
-        if downsample_strategy == "mapq":
-            reads.sort(key=lambda x: (not x.primary, -x.mapq, -(x.end - x.start)))
-            reads = reads[:max_reads]
-        else:
-            reads = reads[:max_reads]
     return reads
 
 
@@ -152,11 +142,9 @@ def fetch_rna_reads(
     chrom: str,
     start: int,
     end: int,
-    max_reads: int = 0,
     mapq_min: int = 0,
     show_supp: bool = True,
     show_secondary: bool = False,
-    downsample_strategy: str = "mapq",
     use_md: bool = False,
     use_cs: bool = True,
     use_ref: bool = False,
@@ -246,15 +234,5 @@ def fetch_rna_reads(
             segments.sort(key=lambda x: -x.end)  # Reverse strand: right to left
         else:
             segments.sort(key=lambda x: x.start)  # Forward strand: left to right
-        all_reads.extend(segments)
-    
-    # Downsample if needed
-    if max_reads > 0 and len(all_reads) > max_reads:
-        if downsample_strategy == "mapq":
-            # Sort by primary status, then mapq, then length
-            all_reads.sort(key=lambda x: (not x.primary, -x.mapq, -(x.end - x.start)))
-            all_reads = all_reads[:max_reads]
-        else:
-            all_reads = all_reads[:max_reads]
-    
+        all_reads.extend(segments)    
     return all_reads
