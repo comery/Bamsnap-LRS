@@ -6,6 +6,7 @@ from xml.dom import minidom
 from .layout import (
     segments_to_pixels,
     assign_stacks,
+    assign_packed_stacks,
     assign_bed_stacks,
     assign_stacks_grouped,
     assign_split_read_stacks,
@@ -94,6 +95,11 @@ SUPPLEMENTARY_READ_COLORS = [
 # from the number of visible pieces in each qname group.
 SUPPLEMENTARY_OPACITY_STEP = 0.20
 SUPPLEMENTARY_MAX_TRANSPARENCY = 0.80
+
+# Scale-aware simplification for broad genomic windows.
+AUTO_SIMPLIFY_BP_PER_PX = 1.0
+AUTO_MIN_DEL_BP = 50
+AUTO_MIN_DEL_PX = 2.0
 
 
 def _is_supplementary_read_group(reads: List[Read], idxs: List[int]) -> bool:
@@ -198,6 +204,20 @@ def rgb_to_hex(rgb: tuple) -> str:
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
 
 
+def _merge_pixel_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    if not spans:
+        return []
+    spans = sorted((a, b) for a, b in spans if b > a)
+    merged = [spans[0]]
+    for a, b in spans[1:]:
+        pa, pb = merged[-1]
+        if a <= pb:
+            merged[-1] = (pa, max(pb, b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
 def _subtract_spans(x0: int, x1: int, spans) -> List[Tuple[int, int]]:
     """Return sub-intervals of [x0, x1) not covered by any span in `spans`.
 
@@ -248,12 +268,271 @@ def _read_base_at_pos(read: Read, pos: int) -> Optional[str]:
 
 
 def _hap_signature(read: Read, site_positions: List[int]) -> str:
-    """Build a per-read haplotype signature over highlighted VCF sites."""
+    """Build a display/debug signature over highlighted VCF sites.
+
+    Missing or uncallable positions are represented as ``?``.  Highlight read
+    clustering does *not* compare these strings directly; see
+    ``_cluster_reads_by_shared_sites`` below.  Keeping this helper is useful for
+    backwards compatibility and debugging.
+    """
     out = []
     for p in site_positions:
         b = _read_base_at_pos(read, p)
         out.append(b if b in ("A", "C", "G", "T") else "?")
     return "".join(out)
+
+
+def _highlight_read_profile(read: Read, site_positions: List[int]) -> Dict[int, str]:
+    """Return only informative observed bases for one read.
+
+    The keys are indices into ``site_positions``.  Positions not covered by the
+    read, deletions, or otherwise uncallable positions are omitted completely
+    rather than encoded as ``?``.  This prevents read length / genomic coverage
+    from dominating highlight-mode clustering.
+    """
+    profile: Dict[int, str] = {}
+    for site_idx, pos in enumerate(site_positions):
+        base = _read_base_at_pos(read, pos)
+        if base in ("A", "C", "G", "T"):
+            profile[site_idx] = base
+    return profile
+
+
+def _cluster_reads_by_shared_sites(
+    reads: List[Read],
+    site_positions: List[int],
+) -> List[List[int]]:
+    """Cluster reads by compatible SNP patterns on *jointly covered* sites.
+
+    This is deliberately not a global h1/h2 assignment.  Different VCF phase
+    sets can use independent haplotype numbering, so the read layout should not
+    assume that h1 in one PS block is globally equivalent to h1 in another.
+
+    Clustering rules:
+      * Only A/C/G/T observations at highlighted sites are compared.
+      * Missing / uncovered positions do not contribute to similarity.
+      * A read may join a cluster when it shares at least one called site with
+        that cluster and has no conflicting base on any shared called site.
+      * Among compatible clusters, the cluster with the greatest number of
+        jointly called sites is preferred.
+      * Reads with no callable highlighted base are kept in a final
+        uninformative cluster rather than being assigned to a haplotype group.
+
+    More informative reads are used as seeds first.  Each cluster stores the
+    union of compatible observed alleles, so partially overlapping reads can
+    link a local SNP pattern across the region without ``?`` driving the result.
+    """
+    if not reads:
+        return []
+
+    profiles = [_highlight_read_profile(r, site_positions) for r in reads]
+
+    # Seed with reads that cover the most highlighted sites.  This makes the
+    # cluster pattern as informative as possible before shorter/partial reads
+    # are assigned, reducing dependence on BAM/read order.
+    seed_order = sorted(
+        range(len(reads)),
+        key=lambda i: (
+            -len(profiles[i]),
+            reads[i].start,
+            reads[i].end,
+            reads[i].qname,
+        ),
+    )
+
+    clusters: List[Dict[str, Any]] = []
+    uninformative: List[int] = []
+
+    for idx in seed_order:
+        profile = profiles[idx]
+        if not profile:
+            uninformative.append(idx)
+            continue
+
+        best_cluster = None
+        best_score = None
+
+        for cluster_idx, cluster in enumerate(clusters):
+            pattern: Dict[int, str] = cluster["pattern"]
+            shared = 0
+            conflict = False
+
+            for site_idx, base in profile.items():
+                cluster_base = pattern.get(site_idx)
+                if cluster_base is None:
+                    continue
+                shared += 1
+                if cluster_base != base:
+                    conflict = True
+                    break
+
+            if conflict or shared == 0:
+                continue
+
+            # Prefer the cluster with the strongest directly observed overlap.
+            # Cluster size is a deterministic secondary criterion.
+            score = (shared, len(cluster["members"]), -cluster_idx)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_cluster = cluster_idx
+
+        if best_cluster is None:
+            clusters.append({
+                "pattern": dict(profile),
+                "members": [idx],
+            })
+            continue
+
+        cluster = clusters[best_cluster]
+        cluster["members"].append(idx)
+        pattern = cluster["pattern"]
+        for site_idx, base in profile.items():
+            if site_idx not in pattern:
+                pattern[site_idx] = base
+
+    # The first greedy pass can leave two compatible local patterns separate
+    # when a later partial read bridges them.  Merge compatible clusters
+    # iteratively so read-supported linkage can propagate across the region.
+    #
+    # Example:
+    #   cluster A: S1=A, S2=C
+    #   bridge:    S2=C, S3=G
+    #   cluster B:       S3=G, S4=T
+    # After the bridge joins A, A and B share S3=G and should become one
+    # cluster.  We repeatedly choose the compatible pair with the strongest
+    # directly shared evidence until no further merge is possible.
+    while True:
+        best_pair = None
+        best_score = None
+
+        for i in range(len(clusters)):
+            pattern_i: Dict[int, str] = clusters[i]["pattern"]
+            for j in range(i + 1, len(clusters)):
+                pattern_j: Dict[int, str] = clusters[j]["pattern"]
+                shared = 0
+                conflict = False
+
+                # Iterate over the smaller pattern for efficiency.
+                if len(pattern_i) <= len(pattern_j):
+                    smaller, larger = pattern_i, pattern_j
+                else:
+                    smaller, larger = pattern_j, pattern_i
+
+                for site_idx, base in smaller.items():
+                    other_base = larger.get(site_idx)
+                    if other_base is None:
+                        continue
+                    shared += 1
+                    if other_base != base:
+                        conflict = True
+                        break
+
+                # A merge requires direct read-supported linkage: at least one
+                # jointly called SNP and zero conflicts on all jointly called
+                # SNPs.  Merely having no conflict because the clusters do not
+                # overlap is not enough.
+                if conflict or shared == 0:
+                    continue
+
+                combined_members = len(clusters[i]["members"]) + len(clusters[j]["members"])
+                combined_pattern_sites = len(set(pattern_i) | set(pattern_j))
+                # Prefer the pair with the strongest shared SNP evidence, then
+                # the larger combined group / pattern.  Final terms make the
+                # choice deterministic when scores tie.
+                score = (
+                    shared,
+                    combined_members,
+                    combined_pattern_sites,
+                    -i,
+                    -j,
+                )
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_pair = (i, j)
+
+        if best_pair is None:
+            break
+
+        i, j = best_pair
+        keep = clusters[i]
+        drop = clusters[j]
+
+        # Compatibility was checked above, so unioning the patterns cannot
+        # overwrite a called site with a different allele.
+        for site_idx, base in drop["pattern"].items():
+            if site_idx not in keep["pattern"]:
+                keep["pattern"][site_idx] = base
+        keep["members"].extend(drop["members"])
+        del clusters[j]
+
+    # Put the most informative local linkage patterns first, then larger groups,
+    # then use genomic position for stable deterministic ordering.  This is only
+    # a visual ordering; clusters are intentionally not labelled h1/h2.
+    def _cluster_sort_key(cluster):
+        members = cluster["members"]
+        left = min(reads[i].start for i in members) if members else 0
+        pattern_items = tuple(sorted(cluster["pattern"].items()))
+        return (-len(cluster["pattern"]), -len(members), left, pattern_items)
+
+    clusters.sort(key=_cluster_sort_key)
+    result = [list(cluster["members"]) for cluster in clusters]
+
+    if uninformative:
+        uninformative.sort(key=lambda i: (reads[i].start, reads[i].end, reads[i].qname))
+        result.append(uninformative)
+
+    return result
+
+
+def _clustered_highlight_read_layout(
+    reads: List[Read],
+    site_positions: List[int],
+    region_start: int,
+    region_end: int,
+    hap_layout: str,
+) -> Tuple[List[Read], List[int]]:
+    """Order highlight reads by local SNP-pattern clusters and assign rows.
+
+    ``packed`` (default) packs non-overlapping reads *within each cluster*.
+    Separate clusters occupy separate row bands but receive no h1/h2 labels.
+    ``row`` preserves the same cluster ordering while using one row per
+    alignment.
+    """
+    clusters = _cluster_reads_by_shared_sites(reads, site_positions)
+    if not clusters:
+        return list(reads), []
+
+    ordered_reads: List[Read] = []
+    stacks: List[int] = []
+    row_offset = 0
+
+    for members in clusters:
+        # Coordinate order inside a local SNP-pattern cluster gives compact and
+        # predictable packing while retaining cluster contiguity.
+        members_sorted = sorted(
+            members,
+            key=lambda i: (reads[i].start, reads[i].end, reads[i].qname),
+        )
+        cluster_reads = [reads[i] for i in members_sorted]
+
+        if hap_layout == "row":
+            local_stacks = list(range(len(cluster_reads)))
+        else:
+            spans = []
+            for r in cluster_reads:
+                s = max(r.start, region_start)
+                e = min(r.end, region_end)
+                if e <= s:
+                    s, e = r.start, r.end
+                spans.append((s, e))
+            local_stacks = assign_packed_stacks(spans)
+
+        ordered_reads.extend(cluster_reads)
+        stacks.extend(row_offset + stack for stack in local_stacks)
+        if local_stacks:
+            row_offset += max(local_stacks) + 1
+
+    return ordered_reads, stacks
 
 def _focus_region_to_pixels(
     focus_region: Optional[Tuple[int, int]],
@@ -563,101 +842,59 @@ def draw_svg_per_track_coverage(
             if base_end_idx > num_bases:
                 base_end_idx = num_bases
 
-            # All genomic positions represented by this output pixel
-            positions = base_distribution[base_start_idx:base_end_idx]
+            agg_ref_match = 0
+            agg_variants = {"A": 0, "C": 0, "G": 0, "T": 0, "N": 0}
+            agg_depth = 0
+            for base_idx in range(base_start_idx, base_end_idx):
+                dist = base_distribution[base_idx]
+                agg_ref_match += dist.get("ref_match", 0)
+                for base in ["A", "C", "G", "T", "N"]:
+                    agg_variants[base] += dist.get(base, 0)
+                agg_depth += dist.get("depth", 0)
 
-            if not positions:
+            num_positions = base_end_idx - base_start_idx
+            if num_positions > 1:
+                agg_ref_match = round(agg_ref_match / num_positions)
+                for base in agg_variants:
+                    if agg_variants[base] > 0:
+                        agg_variants[base] = max(1, math.ceil(agg_variants[base] / num_positions))
+                agg_depth = round(agg_depth / num_positions)
+            if agg_depth == 0:
                 continue
-
-            # Overall coverage height still represents the average depth
-            # across all genomic positions compressed into this pixel.
-            agg_depth = round(
-                sum(p.get("depth", 0) for p in positions) / len(positions)
-            )
-
-            if agg_depth <= 0:
-                continue
-
-            # Preserve the strongest mismatch signal within this pixel.
-            # This avoids diluting a true single-base variant when several
-            # neighboring reference positions are compressed into one pixel.
-            peak_variant_fraction = 0.0
-
-            for p in positions:
-                depth = p.get("depth", 0)
-
-                if depth <= 0:
-                    continue
-
-                variant_count = sum(
-                    p.get(base, 0)
-                    for base in ["A", "C", "G", "T", "N"]
-                )
-
-                variant_fraction = variant_count / depth
-
-                if variant_fraction > peak_variant_fraction:
-                    peak_variant_fraction = variant_fraction
-
-            # Pool all observed non-reference bases within this pixel.
-            # Their relative proportions determine how the colored part
-            # of the coverage bar is divided among A/C/G/T/N.
-            agg_variants = {
-                base: sum(p.get(base, 0) for p in positions)
-                for base in ["A", "C", "G", "T", "N"]
-            }
 
             draw_x = margin + px
             bar_height = int(coverage_height * min(agg_depth / max_cov, 1.0))
             if bar_height <= 0:
                 continue
 
+            total_count = agg_ref_match + sum(agg_variants.values())
+            if total_count == 0:
+                continue
+
             if detail == "low":
                 SubElement(svg, "rect", {
-                    "x": str(draw_x),
-                    "y": str(bar_bottom - bar_height),
-                    "width": "1",
-                    "height": str(bar_height),
-                    "fill": "#b4b4b4"
+                    "x": str(draw_x), "y": str(bar_bottom - bar_height),
+                    "width": "1", "height": str(bar_height), "fill": "#b4b4b4"
                 })
                 continue
 
-            total_variant = sum(agg_variants.values())
-
             base_heights = {}
+            if agg_ref_match > 0:
+                base_heights["ref"] = int(bar_height * agg_ref_match / total_count)
+            for base in ["A", "C", "G", "T", "N"]:
+                count = agg_variants[base]
+                if count > 0:
+                    h = int(bar_height * count / total_count)
+                    base_heights[base] = max(1, h) if h == 0 else h
 
-            if total_variant > 0 and peak_variant_fraction > 0:
-
-                # Total colored height reflects the strongest variant
-                # fraction among genomic positions represented by this pixel.
-                variant_height = (
-                    bar_height
-                    * min(1.0, peak_variant_fraction)
-                )
-
-                # Remaining height is reference-match coverage.
-                ref_height = bar_height - variant_height
-
-                # Divide the colored part according to all variant bases
-                # observed within this pixel. Using floating-point SVG
-                # heights allows several ALT bases to remain visible.
-                for base in ["A", "C", "G", "T", "N"]:
-                    count = agg_variants[base]
-
-                    if count > 0:
-                        base_heights[base] = (
-                            variant_height
-                            * count
-                            / total_variant
-                        )
-
-                if ref_height > 0:
-                    base_heights["ref"] = ref_height
-
-            else:
-                # No mismatch in this pixel: draw the entire coverage
-                # bar as reference-match gray.
-                base_heights["ref"] = float(bar_height)
+            total_height_used = sum(base_heights.values())
+            if total_height_used < bar_height and base_heights:
+                max_base = max(base_heights.items(), key=lambda x: x[1])[0]
+                base_heights[max_base] += (bar_height - total_height_used)
+            elif total_height_used > bar_height:
+                excess = total_height_used - bar_height
+                if "ref" in base_heights and base_heights["ref"] > excess:
+                    base_heights["ref"] -= excess
 
             current_stack_y = bar_bottom
             for base in ["A", "C", "G", "T", "N"]:
@@ -821,6 +1058,129 @@ def draw_svg_gene_track(svg, genes, y, width, start, end, bp_per_px, margin, sta
     return header_h + num_stacks * 20 + 10
 
 
+
+GFF_TRANSCRIPT_ROW_HEIGHT = 26
+
+
+def _visible_gff_transcripts(genes, start, end):
+    """Flatten transcript models from overlapping genes in stable genomic order."""
+    transcripts = []
+    for gene in genes:
+        for tx in getattr(gene, "transcripts", []) or []:
+            if tx.end >= start and tx.start <= end:
+                transcripts.append(tx)
+    transcripts.sort(key=lambda tx: (tx.start, tx.end, tx.gene_id, tx.id))
+    return transcripts
+
+
+def _transcript_display_label(tx):
+    """Choose a readable transcript label for transcript annotation mode.
+
+    Priority:
+      1. transcript_name
+      2. gene_name-transcript_id
+      3. gene_id-transcript_id
+      4. transcript_id
+    """
+    tx_name = getattr(tx, "name", None)
+    if tx_name and tx_name != getattr(tx, "id", None):
+        return tx_name
+
+    gene_name = getattr(tx, "gene_name", None)
+    tx_id = getattr(tx, "id", "")
+    if gene_name and tx_id:
+        return f"{gene_name}-{tx_id}"
+
+    gene_id = getattr(tx, "gene_id", None)
+    if gene_id and tx_id:
+        return f"{gene_id}-{tx_id}"
+
+    return tx_id or gene_id or "transcript"
+
+
+def draw_svg_transcript_track(svg, genes, y, width, start, end, bp_per_px, margin):
+    """Draw one GFF/GTF transcript model per row."""
+    header_h = draw_svg_track_header(svg, "Transcript Annotation", y, width + 2 * margin)
+    current_y = y + header_h + 5
+    transcripts = _visible_gff_transcripts(genes, start, end)
+
+    color_utr = "#6495ed"
+    color_cds = "#c8a032"
+    feature_height = 10
+
+    for row, tx in enumerate(transcripts):
+        tx_y = current_y + row * GFF_TRANSCRIPT_ROW_HEIGHT
+        mid_y = tx_y + 5
+
+        tx0 = margin + int((max(tx.start, start) - start) / bp_per_px)
+        tx1 = margin + int((min(tx.end, end) - start) / bp_per_px)
+        if tx1 <= tx0:
+            continue
+
+        # Transcript span / intron backbone.
+        SubElement(svg, "line", {
+            "x1": str(tx0), "y1": str(mid_y),
+            "x2": str(tx1), "y2": str(mid_y),
+            "stroke": "black", "stroke-width": "1"
+        })
+
+        # Strand arrow, matching the existing gene-level style.
+        head_size = 6
+        arrow_width = 4
+        connector_length = 3
+        if tx.strand == '+':
+            arrow_x = tx1 + connector_length
+            SubElement(svg, "line", {
+                "x1": str(tx1), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x+head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
+            })
+        elif tx.strand == '-':
+            arrow_x = tx0 - connector_length
+            SubElement(svg, "line", {
+                "x1": str(tx0), "y1": str(mid_y),
+                "x2": str(arrow_x), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+            SubElement(svg, "polygon", {
+                "points": f"{arrow_x},{mid_y-arrow_width} {arrow_x-head_size},{mid_y} {arrow_x},{mid_y+arrow_width}",
+                "fill": "black", "stroke": "black", "stroke-width": "0.5"
+            })
+
+        # Exons first, then CDS overlaid using the same colors as gene mode.
+        for exon in tx.exons:
+            ex0 = margin + int((max(exon.start, start) - start) / bp_per_px)
+            ex1 = margin + int((min(exon.end, end) - start) / bp_per_px)
+            if ex1 > ex0:
+                SubElement(svg, "rect", {
+                    "x": str(ex0), "y": str(mid_y - feature_height / 2),
+                    "width": str(ex1 - ex0), "height": str(feature_height),
+                    "fill": color_utr
+                })
+
+        for cds in tx.cds:
+            cx0 = margin + int((max(cds.start, start) - start) / bp_per_px)
+            cx1 = margin + int((min(cds.end, end) - start) / bp_per_px)
+            if cx1 > cx0:
+                SubElement(svg, "rect", {
+                    "x": str(cx0), "y": str(mid_y - feature_height / 2),
+                    "width": str(cx1 - cx0), "height": str(feature_height),
+                    "fill": color_cds
+                })
+
+        # Prefer transcript_name for readability; fall back to IDs if needed.
+        label = _transcript_display_label(tx)
+        SubElement(svg, "text", {
+            "x": str(tx0), "y": str(mid_y + 16),
+            "font-size": "10", "fill": "black"
+        }).text = label
+
+    return header_h + len(transcripts) * GFF_TRANSCRIPT_ROW_HEIGHT + 10
+
 def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, stacks):
     """Draw BED track in SVG"""
     header_h = draw_svg_track_header(svg, "BED Annotation", y, width + 2 * margin)
@@ -849,28 +1209,21 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
 
         feature_height = 10
 
-        # Draw main feature rectangle
-        SubElement(svg, "rect", {
-            "x": str(fx0), "y": str(mid_y - feature_height / 2),
-            "width": str(fx1 - fx0), "height": str(feature_height),
-            "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
-        })
-
-        # Draw thickStart/thickEnd if specified (CDS-like region)
-        if feat.thick_start is not None and feat.thick_end is not None:
-            thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
-            thick_x1 = margin + int((min(feat.thick_end, end) - start) / bp_per_px)
-            if thick_x1 > thick_x0:
-                thick_color_hex = rgb_to_hex(feat.item_rgb) if feat.item_rgb else thick_color
-                SubElement(svg, "rect", {
-                    "x": str(thick_x0), "y": str(mid_y - feature_height / 2),
-                    "width": str(thick_x1 - thick_x0), "height": str(feature_height),
-                    "fill": thick_color_hex, "stroke": "black", "stroke-width": "0.5"
-                })
-
-        # Draw blocks (exons) if available
         if feat.blocks:
-            for block in feat.blocks:
+            # BED12: draw the transcript span as a thin backbone, then draw
+            # only the exon blocks as filled rectangles.  Do NOT fill the
+            # whole chromStart-chromEnd interval, because that would paint
+            # introns as if they were exons.
+            SubElement(svg, "line", {
+                "x1": str(fx0), "y1": str(mid_y),
+                "x2": str(fx1), "y2": str(mid_y),
+                "stroke": "black", "stroke-width": "1"
+            })
+
+            sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
+
+            # Draw exon blocks.
+            for block in sorted_blocks:
                 bx0 = margin + int((max(block.start, start) - start) / bp_per_px)
                 bx1 = margin + int((min(block.end, end) - start) / bp_per_px)
                 if bx1 > bx0:
@@ -880,23 +1233,53 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
                         "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
                     })
 
-            # Draw intron lines between blocks
-            if len(feat.blocks) > 1:
-                sorted_blocks = sorted(feat.blocks, key=lambda b: b.start)
-                for j in range(len(sorted_blocks) - 1):
-                    block_end = sorted_blocks[j].end
-                    next_block_start = sorted_blocks[j + 1].start
-                    if block_end < next_block_start:
-                        line_x0 = margin + int((max(block_end, start) - start) / bp_per_px)
-                        line_x1 = margin + int((min(next_block_start, end) - start) / bp_per_px)
-                        if line_x1 > line_x0:
-                            SubElement(svg, "line", {
-                                "x1": str(line_x0), "y1": str(mid_y),
-                                "x2": str(line_x1), "y2": str(mid_y),
-                                "stroke": "black", "stroke-width": "1"
-                            })
+            # BED12 thickStart/thickEnd describes the thick portion of the
+            # blocks (commonly CDS).  Intersect it with each exon so that a
+            # thick region never fills an intron.
+            if (
+                feat.thick_start is not None
+                and feat.thick_end is not None
+                and feat.thick_end > feat.thick_start
+            ):
+                thick_color_hex = rgb_to_hex(feat.item_rgb) if feat.item_rgb else thick_color
+                for block in sorted_blocks:
+                    thick_start = max(block.start, feat.thick_start, start)
+                    thick_end = min(block.end, feat.thick_end, end)
+                    if thick_end <= thick_start:
+                        continue
+                    thick_x0 = margin + int((thick_start - start) / bp_per_px)
+                    thick_x1 = margin + int((thick_end - start) / bp_per_px)
+                    if thick_x1 > thick_x0:
+                        SubElement(svg, "rect", {
+                            "x": str(thick_x0), "y": str(mid_y - feature_height / 2),
+                            "width": str(thick_x1 - thick_x0), "height": str(feature_height),
+                            "fill": thick_color_hex, "stroke": "black", "stroke-width": "0.5"
+                        })
         else:
-            # If no blocks, draw intron line for the whole feature
+            # Non-BED12 feature: preserve the previous full-span rectangle.
+            SubElement(svg, "rect", {
+                "x": str(fx0), "y": str(mid_y - feature_height / 2),
+                "width": str(fx1 - fx0), "height": str(feature_height),
+                "fill": color_hex, "stroke": "black", "stroke-width": "0.5"
+            })
+
+            # Optional thick region for BED records without block columns.
+            if (
+                feat.thick_start is not None
+                and feat.thick_end is not None
+                and feat.thick_end > feat.thick_start
+            ):
+                thick_x0 = margin + int((max(feat.thick_start, start) - start) / bp_per_px)
+                thick_x1 = margin + int((min(feat.thick_end, end) - start) / bp_per_px)
+                if thick_x1 > thick_x0:
+                    thick_color_hex = rgb_to_hex(feat.item_rgb) if feat.item_rgb else thick_color
+                    SubElement(svg, "rect", {
+                        "x": str(thick_x0), "y": str(mid_y - feature_height / 2),
+                        "width": str(thick_x1 - thick_x0), "height": str(feature_height),
+                        "fill": thick_color_hex, "stroke": "black", "stroke-width": "0.5"
+                    })
+
+            # Keep the original center line for simple BED features.
             SubElement(svg, "line", {
                 "x1": str(fx0), "y1": str(mid_y),
                 "x2": str(fx1), "y2": str(mid_y),
@@ -956,7 +1339,7 @@ def draw_svg_bed_track(svg, features, y, width, start, end, bp_per_px, margin, s
 SVG_VCF_MARKER_ROW_H = 10
 SVG_VCF_BASE_ROW_H = 11
 SVG_VCF_ROW_GAP = 2
-SVG_VCF_GUTTER = 90
+SVG_VCF_LEGEND_H = 12
 
 
 def _svg_sample_ploidy(sites, sname: str) -> int:
@@ -978,7 +1361,7 @@ def _svg_vcf_highlight_track_height_rows(rows_per_sample):
         + sum(rows_per_sample) * SVG_VCF_BASE_ROW_H
         + (total_rows - 1) * SVG_VCF_ROW_GAP
     )
-    return header_h + 4 + rows_px + 6
+    return header_h + 4 + SVG_VCF_LEGEND_H + SVG_VCF_ROW_GAP + rows_px + 6
 
 
 def svg_vcf_highlight_track_height(num_samples: int) -> int:
@@ -1190,13 +1573,46 @@ def draw_svg_vcf_highlight_track(
     header_h = draw_svg_track_header(svg, "VCF Highlights", y, width + 2 * margin)
     cursor_y = y + header_h + 4
 
-    plot_x0 = margin + SVG_VCF_GUTTER
+    plot_x0 = margin
     plot_x1 = margin + width
 
     def site_to_x(pos: int) -> int:
         return margin + int((pos - start) / bp_per_px)
 
     cell_w = max(2, int(round(1.0 / bp_per_px)) if bp_per_px < 1 else 2)
+
+    # Row labels are shown as a compact legend above the plotting rows rather
+    # than as an opaque left-side gutter.  This keeps the full genomic plotting
+    # width available, so SNPs near the left boundary are never covered by text.
+    legend_labels = ["SNP sites"]
+    for sname in samples:
+        is_single_synthetic = len(samples) == 1 and sname == "VCF"
+        short_name = sname if len(sname) <= 12 else sname[:11] + "…"
+        ploidy = _svg_sample_ploidy(sites, sname)
+        any_phased = any(
+            sites[i].sample_calls.get(sname, SampleCall()).is_phased
+            for i in range(len(sites))
+        )
+        n_rows = ploidy if any_phased else 2
+        if is_single_synthetic:
+            legend_labels.extend(["REF", "ALT"])
+        elif any_phased:
+            legend_labels.extend([f"{short_name} h{r + 1}" for r in range(n_rows)])
+        else:
+            legend_labels.extend([f"{short_name} REF", f"{short_name} ALT"])
+
+    legend_y0 = cursor_y
+    SubElement(svg, "rect", {
+        "x": str(margin), "y": str(legend_y0),
+        "width": str(width), "height": str(SVG_VCF_LEGEND_H),
+        "fill": "#f0f0f0"
+    })
+    SubElement(svg, "text", {
+        "x": str(margin + 2),
+        "y": str(legend_y0 + SVG_VCF_LEGEND_H - 3),
+        "font-size": "9", "fill": "#464646"
+    }).text = "Rows: " + " | ".join(legend_labels)
+    cursor_y += SVG_VCF_LEGEND_H + SVG_VCF_ROW_GAP
 
     # --- SNP marker row ------------------------------------------------------
     marker_y0 = cursor_y
@@ -1232,19 +1648,9 @@ def draw_svg_vcf_highlight_track(
                 "width": str(cell_w), "height": str(marker_y1 - mid),
                 "fill": rgb_to_hex(alt_rgb)
             })
-    SubElement(svg, "rect", {
-        "x": str(margin), "y": str(marker_y0),
-        "width": str(SVG_VCF_GUTTER), "height": str(SVG_VCF_MARKER_ROW_H),
-        "fill": "#f0f0f0"
-    })
-    SubElement(svg, "text", {
-        "x": str(margin + 2), "y": str(marker_y0 + SVG_VCF_MARKER_ROW_H - 2),
-        "font-size": "9", "fill": "#464646"
-    }).text = "SNP sites"
     cursor_y = marker_y1 + SVG_VCF_ROW_GAP
 
     # --- Per-sample rows (N rows per sample, N = observed ploidy) -----------
-    PHASE_BG = "#d8d8d8"
     UNPHASED_BG = "#f8f8f8"
     for sname in samples:
         is_single_synthetic = len(samples) == 1 and sname == "VCF"
@@ -1346,25 +1752,6 @@ def draw_svg_vcf_highlight_track(
                         "fill": rgb_to_hex(rgb)
                     })
 
-        # Gutter overlays + labels
-        if is_single_synthetic:
-            labels = ["REF", "ALT"]
-        elif any_phased:
-            labels = [f"{short_name} h{r + 1}" for r in range(n_rows)]
-        else:
-            labels = [f"{short_name} REF", f"{short_name} ALT"]
-        for r_idx in range(n_rows):
-            ry = row_y0[r_idx]
-            SubElement(svg, "rect", {
-                "x": str(margin), "y": str(ry),
-                "width": str(SVG_VCF_GUTTER), "height": str(SVG_VCF_BASE_ROW_H),
-                "fill": "#f0f0f0"
-            })
-            if r_idx < len(labels):
-                SubElement(svg, "text", {
-                    "x": str(margin + 2), "y": str(ry + SVG_VCF_BASE_ROW_H - 2),
-                    "font-size": "9", "fill": "#464646"
-                }).text = labels[r_idx]
         cursor_y = sample_bottom + SVG_VCF_ROW_GAP
 
     SubElement(svg, "line", {
@@ -1399,11 +1786,14 @@ def render_svg_snapshot(
     is_rna: bool = False,
     gff_genes: Optional[List[Any]] = None,
     bed_features: Optional[List[Any]] = None,
+    gff_display: str = "gene",
     highlight_sites: Optional[List[HighlightSite]] = None,
     highlight_samples: Optional[List[str]] = None,
     no_hap_sort: bool = False,
     no_hap_filter: bool = False,
+    hap_layout: str = "packed",
     focus_region: Optional[Tuple[int, int]] = None,
+    overview_detail: str = "hide",
     **kwargs
 ) -> str:
     """Render snapshot as SVG string"""
@@ -1437,11 +1827,15 @@ def render_svg_snapshot(
     gene_stacks = []
     bed_stacks = []
     if gff_genes:
-        gene_spans = [(g.start, g.end) for g in gff_genes]
-        gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
-        # Header (15) + Genes area
-        num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
-        annotation_track_h = 15 + num_stacks * 20 + 10
+        if gff_display == "transcript":
+            visible_transcripts = _visible_gff_transcripts(gff_genes, start, end)
+            annotation_track_h = 15 + len(visible_transcripts) * GFF_TRANSCRIPT_ROW_HEIGHT + 10
+        else:
+            gene_spans = [(g.start, g.end) for g in gff_genes]
+            gene_stacks = assign_stacks(gene_spans, max_stack=len(gff_genes))
+            # Header (15) + Genes area
+            num_stacks = max(gene_stacks) + 1 if gene_stacks else 0
+            annotation_track_h = 15 + num_stacks * 20 + 10
         total_height += annotation_track_h
     elif bed_features:
         bed_spans = [(f.start, f.end) for f in bed_features]
@@ -1460,18 +1854,28 @@ def render_svg_snapshot(
 
     # When highlight is active:
     #   - filter reads that don't cover any VCF site (unless --no-hap-filter)
-    #   - sort by observed hap signature (unless --no-hap-sort)
+    #   - cluster/order reads using only SNP bases observed at jointly covered
+    #     highlight sites (unless --no-hap-sort). Missing positions do not drive
+    #     the clustering, and VCF h1/h2 labels are not used for read grouping.
     do_hap_sort = bool(highlight_sites) and not no_hap_sort
     do_hap_filter = bool(highlight_sites) and not no_hap_filter
+    site_positions: List[int] = []
     if highlight_sites:
-        site_positions = sorted(s.pos for s in highlight_sites)
-        if site_positions:
-            first_p, last_p = site_positions[0], site_positions[-1]
+        # Base-pattern clustering is meaningful for SNVs. If a highlight VCF
+        # contains only non-SNV records, fall back to their anchor positions so
+        # existing highlight behavior remains usable.
+        site_positions = sorted(s.pos for s in highlight_sites if s.is_snv)
+        filter_positions = sorted(s.pos for s in highlight_sites)
+        if not site_positions:
+            site_positions = list(filter_positions)
+
+        if filter_positions:
+            first_p, last_p = filter_positions[0], filter_positions[-1]
 
             def _covers_any(r):
                 if r.end <= first_p or r.start > last_p:
                     return False
-                for p in site_positions:
+                for p in filter_positions:
                     if r.start <= p < r.end:
                         return True
                 return False
@@ -1479,17 +1883,14 @@ def render_svg_snapshot(
             for track in tracks:
                 if do_hap_filter:
                     track['reads'] = [r for r in track['reads'] if _covers_any(r)]
-                if do_hap_sort:
-                    track['reads'] = sorted(
-                        track['reads'],
-                        key=lambda r: (_hap_signature(r, site_positions), r.start),
-                    )
 
     for track in tracks:
         reads = track['reads']
         if do_hap_sort:
-            # In VCF highlight mode, one read per row to preserve haplotype sort order
-            stacks = list(range(len(reads)))
+            reads, stacks = _clustered_highlight_read_layout(
+                reads, site_positions, start, end, hap_layout
+            )
+            track['reads'] = reads
         else:
             if is_rna:
                 spans = [(max(r.start, start), min(r.end, end)) for r in reads]
@@ -1646,17 +2047,29 @@ def render_svg_snapshot(
 
     # Draw annotation track if enabled
     if gff_genes:
-        current_y += draw_svg_gene_track(
-            svg,
-            gff_genes,
-            current_y,
-            content_width,
-            start,
-            end,
-            bp_per_px,
-            margin,
-            gene_stacks
-        )
+        if gff_display == "transcript":
+            current_y += draw_svg_transcript_track(
+                svg,
+                gff_genes,
+                current_y,
+                content_width,
+                start,
+                end,
+                bp_per_px,
+                margin,
+            )
+        else:
+            current_y += draw_svg_gene_track(
+                svg,
+                gff_genes,
+                current_y,
+                content_width,
+                start,
+                end,
+                bp_per_px,
+                margin,
+                gene_stacks
+            )
     elif bed_features:
         current_y += draw_svg_bed_track(
             svg,
@@ -1689,6 +2102,9 @@ def render_svg_snapshot(
     svg_highlight_index = {}
     if highlight_sites:
         svg_highlight_index = {s.pos: s for s in highlight_sites}
+
+    # At broad scales, hide base-level noise but keep alignment geometry, large D, N and supplementary styling.
+    auto_simplify = bp_per_px > AUTO_SIMPLIFY_BP_PER_PX and not svg_highlight_index and overview_detail != "show"
 
     # Phase blocks (with assigned backdrop colors) by VCF sample. Used to tint
     # read rows that uniquely match a hap pattern. For multi-sample VCFs, a BAM
@@ -1786,6 +2202,7 @@ def render_svg_snapshot(
                 ))
 
             supp_style = supplementary_read_styles.get(idx)
+            supp_opacity = supp_style[1] if supp_style else None
             # Draw insertion blocks after the read body. If they are drawn in
             # segment order, the following match block can cover part of the
             # purple insertion because insertion consumes no reference pixels.
@@ -1808,6 +2225,32 @@ def render_svg_snapshot(
                     rect_to_seg[rect_idx] = seg_idx
                     rect_idx += 1
                 ref_cursor += seg.ref_consumed
+
+            # At overview scale, many short CIGAR/MD segments can map to the same pixel.
+            # Drawing each semi-transparent supplementary segment separately would stack alpha
+            # and create artificial dark stripes. Draw the body-like spans once as a merged union.
+            supp_overview_body = bool(supp_style and auto_simplify)
+            if supp_overview_body:
+                body_spans = []
+                for _rect_idx, (_t, _x0, _x1) in enumerate(rects):
+                    _x0d = max(margin, min(width - margin, margin + _x0))
+                    _x1d = max(margin, min(width - margin, margin + _x1))
+                    if _x1d <= _x0d:
+                        continue
+                    _body_like = _t in ("match", "mismatch")
+                    if _t == "del":
+                        _seg_idx = rect_to_seg.get(_rect_idx)
+                        _seg = r.segments[_seg_idx] if _seg_idx is not None else None
+                        if _seg is not None:
+                            _del_bp = int(getattr(_seg, "length", _seg.ref_consumed))
+                            _body_like = _del_bp < AUTO_MIN_DEL_BP or (_x1d - _x0d) < AUTO_MIN_DEL_PX
+                    if _body_like:
+                        body_spans.append((_x0d, _x1d))
+                fill_rgb, fill_opacity = supp_style
+                for _bx0, _bx1 in _merge_pixel_spans(body_spans):
+                    SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                        _bx0, y, _bx1 - _bx0, read_height, rgb_to_hex(fill_rgb), fill_opacity
+                    ))
 
             for rect_idx, (t, x0, x1) in enumerate(rects):
                 x0_draw = margin + x0
@@ -1838,7 +2281,7 @@ def render_svg_snapshot(
                 if t == "ins":
                     # In highlight mode, suppress ins ticks/labels entirely
                     # (long-read ins noise distracts from VCF-site analysis).
-                    if svg_highlight_index:
+                    if svg_highlight_index or auto_simplify:
                         pass
                     else:
                         # --hide-indels does not remove the insertion from the read model.
@@ -1866,57 +2309,73 @@ def render_svg_snapshot(
                         if ins_x1 <= ins_x0:
                             ins_x0 = max(margin, ins_x0 - one_base_px)
                             ins_x1 = min(width - margin, ins_x0 + one_base_px)
-                        insertion_overlays.append((ins_x0, ins_x1, y, read_height, ins_color_hex, label))
+                        insertion_overlays.append((ins_x0, ins_x1, y, read_height, ins_color_hex, label, supp_opacity))
                 elif t == "ref_skip":
                     y_center = y + read_height // 2
-                    SubElement(svg, "line", {
+                    skip_attrs = {
                         "x1": str(x0_draw), "y1": str(y_center),
                         "x2": str(x1_draw), "y2": str(y_center),
                         "stroke": "#b0c4de", "stroke-width": "1"
-                    })
+                    }
+                    if supp_opacity is not None and supp_opacity < 0.999:
+                        skip_attrs["stroke-opacity"] = f"{supp_opacity:.3f}"
+                    SubElement(svg, "line", skip_attrs)
                 elif t == "del":
-                    # Highlight mode: draw del in muted-gray so it blends in
-                    # with matches and doesn't steal attention from VCF sites.
-                    # Inside a hap-colored block span we skip the gray so a
-                    # small deletion does not punch a gray hole in the colored
-                    # haplotype block (the colored base body shows through).
-                    del_fill = MUTED_MISMATCH_HEX if svg_highlight_index else "#808080"
-                    del_pieces = (
-                        _subtract_spans(x0_draw, x1_draw, matched_px_spans)
-                        if matched_px_spans else [(x0_draw, x1_draw)]
-                    )
-                    for gx0, gx1 in del_pieces:
-                        SubElement(svg, "rect", {
-                            "x": str(gx0), "y": str(y),
-                            "width": str(gx1 - gx0), "height": str(read_height),
-                            "fill": del_fill, "stroke": "none", "stroke-width": "1"
-                        })
-                    if not svg_highlight_index and detail == "high" and show_insertion_labels:
-                        seg_idx = rect_to_seg.get(rect_idx)
-                        if seg_idx is not None:
-                            seg = r.segments[seg_idx]
-                            if seg and seg.length > 0:
-                                del_width = x1_draw - x0_draw
-                                label = str(seg.length)
-                                if del_width > 12:  # Enough space inside
-                                    SubElement(svg, "text", {
-                                        "x": str((x0_draw + x1_draw) / 2), "y": str(y + read_height - 1),
-                                        "font-size": "7", "fill": "white",
-                                        "text-anchor": "middle"
-                                    }).text = label
-                                else:  # Too small, put above
-                                    SubElement(svg, "text", {
-                                        "x": str((x0_draw + x1_draw) / 2), "y": str(y - 2),
-                                        "font-size": "8", "fill": "black",
-                                        "text-anchor": "middle"
-                                    }).text = label
+                    seg_idx = rect_to_seg.get(rect_idx)
+                    seg = r.segments[seg_idx] if seg_idx is not None else None
+                    small_overview_del = False
+                    if auto_simplify and seg is not None:
+                        del_bp = int(getattr(seg, "length", seg.ref_consumed))
+                        del_width_px = max(0, x1_draw - x0_draw)
+                        small_overview_del = del_bp < AUTO_MIN_DEL_BP or del_width_px < AUTO_MIN_DEL_PX
+
+                    if small_overview_del:
+                        # At overview scale, unresolved short D is merged into the read body instead of leaving a white gap.
+                        if supp_overview_body:
+                            pass
+                        elif supp_style:
+                            fill_rgb, fill_opacity = supp_style
+                            SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                                x0_draw, y, x1_draw - x0_draw, read_height,
+                                rgb_to_hex(fill_rgb), fill_opacity
+                            ))
+                        else:
+                            for gx0, gx1 in _subtract_spans(x0_draw, x1_draw, matched_px_spans):
+                                SubElement(svg, "rect", {
+                                    "x": str(gx0), "y": str(y),
+                                    "width": str(gx1 - gx0), "height": str(read_height),
+                                    "fill": MATCH_HEX, "stroke": "none"
+                                })
+                    else:
+                        # Retained D remains a gray rectangle so it is visually distinct from N/ref_skip.
+                        del_fill = MUTED_MISMATCH_HEX if svg_highlight_index else "#808080"
+                        del_pieces = _subtract_spans(x0_draw, x1_draw, matched_px_spans) if matched_px_spans else [(x0_draw, x1_draw)]
+                        for gx0, gx1 in del_pieces:
+                            SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                                gx0, y, gx1 - gx0, read_height, del_fill, supp_opacity
+                            ))
+                        if not svg_highlight_index and detail == "high" and show_insertion_labels and seg is not None and seg.length > 0:
+                            del_width = x1_draw - x0_draw
+                            label = str(seg.length)
+                            if del_width > 12:
+                                SubElement(svg, "text", {
+                                    "x": str((x0_draw + x1_draw) / 2), "y": str(y + read_height - 1),
+                                    "font-size": "7", "fill": "white", "text-anchor": "middle"
+                                }).text = label
+                            else:
+                                SubElement(svg, "text", {
+                                    "x": str((x0_draw + x1_draw) / 2), "y": str(y - 2),
+                                    "font-size": "8", "fill": "black", "text-anchor": "middle"
+                                }).text = label
                 elif t == "mismatch":
                     # See png_renderer.py for the rationale. When no highlight
                     # VCF is active we keep the original behavior; otherwise
                     # we paint the rect muted gray then overdraw per-base
                     # colored cells only where the ref position is a VCF site.
-                    if detail == "low":
-                        if supp_style:
+                    if detail == "low" or auto_simplify:
+                        if supp_overview_body:
+                            pass
+                        elif supp_style:
                             fill_rgb, fill_opacity = supp_style
                             SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
                                 x0_draw, y, x1_draw - x0_draw, read_height,
@@ -1941,11 +2400,10 @@ def render_svg_snapshot(
                                 current_color_hex = "#c3c3c3"
                         else:
                             current_color_hex = "#c3c3c3"
-                        SubElement(svg, "rect", {
-                            "x": str(x0_draw), "y": str(y),
-                            "width": str(x1_draw - x0_draw), "height": str(read_height),
-                            "fill": current_color_hex, "stroke": "none"
-                        })
+                        SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                            x0_draw, y, x1_draw - x0_draw, read_height,
+                            current_color_hex, supp_opacity
+                        ))
                     else:
                         # Highlight-aware SVG mismatch rendering.
                         if supp_style:
@@ -1983,18 +2441,18 @@ def render_svg_snapshot(
                                     bx1 = bx0 + 1
                                 bx0 = max(margin, min(width - margin, bx0))
                                 bx1 = max(margin, min(width - margin, bx1))
-                                SubElement(svg, "rect", {
-                                    "x": str(bx0), "y": str(y),
-                                    "width": str(bx1 - bx0), "height": str(read_height),
-                                    "fill": rgb_to_hex(col), "stroke": "none"
-                                })
+                                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                                    bx0, y, bx1 - bx0, read_height, rgb_to_hex(col), supp_opacity
+                                ))
                 else:
                     if t == "match":
                         # First paint the whole match block in muted gray,
                         # then in highlight mode overdraw per-base color
                         # cells at each VCF site using the read's actual base
                         # (matches png_renderer behavior).
-                        if supp_style:
+                        if supp_overview_body:
+                            pass
+                        elif supp_style:
                             fill_rgb, fill_opacity = supp_style
                             SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
                                 x0_draw, y, x1_draw - x0_draw, read_height,
@@ -2029,11 +2487,9 @@ def render_svg_snapshot(
                                     bx1 = bx0 + 1
                                 bx0 = max(margin, min(width - margin, bx0))
                                 bx1 = max(margin, min(width - margin, bx1))
-                                SubElement(svg, "rect", {
-                                    "x": str(bx0), "y": str(y),
-                                    "width": str(bx1 - bx0), "height": str(read_height),
-                                    "fill": rgb_to_hex(col), "stroke": "none"
-                                })
+                                SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                                    bx0, y, bx1 - bx0, read_height, rgb_to_hex(col), supp_opacity
+                                ))
                     else:
                         if supp_style and t in ("match", "soft", "hard"):
                             fill_rgb, fill_opacity = supp_style
@@ -2049,14 +2505,13 @@ def render_svg_snapshot(
                             })
 
             # Draw insertion blocks last so adjacent match blocks cannot cover them.
-            for ins_x0, ins_x1, ins_y, ins_h, ins_color, ins_label in insertion_overlays:
+            for ins_x0, ins_x1, ins_y, ins_h, ins_color, ins_label, ins_opacity in insertion_overlays:
                 ins_w = max(1, ins_x1 - ins_x0)
-                SubElement(svg, "rect", {
-                    "x": str(ins_x0), "y": str(ins_y),
-                    "width": str(ins_w), "height": str(ins_h),
-                    "fill": ins_color, "stroke": "none",
-                    "pointer-events": "none",
-                })
+                ins_attrs = _svg_rect_attrs_with_optional_opacity(
+                    ins_x0, ins_y, ins_w, ins_h, ins_color, ins_opacity
+                )
+                ins_attrs["pointer-events"] = "none"
+                SubElement(svg, "rect", ins_attrs)
                 if ins_label:
                     SubElement(svg, "text", {
                         "x": str(ins_x0 + ins_w / 2.0), "y": str(ins_y - 2),
@@ -2117,12 +2572,9 @@ def render_svg_snapshot(
                             f"{read_x1 - head},{y + read_height+1.5}"
                         )
 
-                    arrow_attrs = {
-                        "points": arrow_pts,
-                        "fill": "#ff0000"
-                    }
-                    if supp_style:
-                        arrow_attrs["fill"] = "#ff0000"
+                    arrow_attrs = {"points": arrow_pts, "fill": "#ff0000"}
+                    if supp_opacity is not None and supp_opacity < 0.999:
+                        arrow_attrs["fill-opacity"] = f"{supp_opacity:.3f}"
                     SubElement(svg, "polygon", arrow_attrs)
 
         # Connect segments
