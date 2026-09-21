@@ -207,11 +207,11 @@ def _calculate_vcf_target_region(
             target_start = pos - 1
             target_end = pos + 1
         else:
-            # VCF POS and END are 1-based; convert to 0-based half-open for the
-            # renderer which uses pysam / 0-based coordinates throughout.
-            # target_start = pos - 1
-            # target_end = max(end_pos, pos + 1) - 1
-            target_start = pos 
+            # For spanning SVs, the VCF POS base is treated as the left anchor.
+            # The highlighted target interval represents the affected sequence
+            # after the anchor base. Therefore, affected bases POS+1..END
+            # in 1-based VCF coordinates correspond to [POS, END) internally.
+            target_start = pos -1 +1
             target_end = max(end_pos, pos + 1) 
     else:
         ref_len = len(ref) if ref else 1
