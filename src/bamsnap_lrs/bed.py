@@ -1,4 +1,5 @@
 import os
+import gzip
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -25,6 +26,20 @@ class BedFeature:
     blocks: List[BedBlock] = field(default_factory=list)  # blockCount, blockSizes, blockStarts
 
 
+def _open_bed_file(path: str):
+    """Open a plain-text, gzip, or BGZF-compressed BED file in text mode.
+
+    BGZF uses the gzip container format, so gzip.open() can read it
+    sequentially. Magic-byte detection also allows compressed BED files whose
+    filename does not end in .gz/.bgz.
+    """
+    with open(path, "rb") as raw:
+        is_gzip = raw.read(2) == b"\x1f\x8b"
+    if is_gzip:
+        return gzip.open(path, "rt", encoding="utf-8")
+    return open(path, "rt", encoding="utf-8")
+
+
 def parse_bed(bed_path: str, chrom: str, start: int, end: int) -> List[BedFeature]:
     """Parse BED file and extract features within range"""
     if not os.path.exists(bed_path):
@@ -32,7 +47,7 @@ def parse_bed(bed_path: str, chrom: str, start: int, end: int) -> List[BedFeatur
 
     features: List[BedFeature] = []
 
-    with open(bed_path, 'r') as f:
+    with _open_bed_file(bed_path) as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line or line.startswith('#'):
