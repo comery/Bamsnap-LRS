@@ -123,59 +123,170 @@ def parse_cs(cs: str) -> List[Tuple[str, int, Optional[str]]]:
 def from_cigar_md_cs(cigar: str, md: Optional[str] = None, cs: Optional[str] = None) -> List[Segment]:
     ops = parse_cigar_string(cigar)
     out: List[Segment] = []
+
+    # CS path: use cs for detailed alignment states, but preserve CIGAR-only
+    # operations such as soft/hard clipping and padding.
     if cs:
         detail = parse_cs(cs)
-        for d_op, d_len, d_seq in detail:
-            if d_op == "=":
-                out.append(Segment("match", "=", d_len, d_len, d_len))
-            elif d_op == "X":
-                out.append(Segment("mismatch", "X", 1, 1, 1))
-            elif d_op == "I":
-                out.append(Segment("ins", "I", d_len, 0, d_len, read_seq=d_seq))
-            elif d_op == "D":
-                out.append(Segment("del", "D", d_len, d_len, 0))
-            elif d_op == "N":
-                out.append(Segment("ref_skip", "N", d_len, d_len, 0))
+        d_idx = 0
+        d_off = 0
+
+        def take_cs(allowed_ops, need):
+            nonlocal d_idx, d_off
+            while need > 0:
+                if d_idx >= len(detail):
+                    raise ValueError("cs tag is shorter than CIGAR")
+
+                d_op, d_len, d_seq = detail[d_idx]
+                remain = d_len - d_off
+                if remain <= 0:
+                    d_idx += 1
+                    d_off = 0
+                    continue
+
+                if d_op not in allowed_ops:
+                    raise ValueError(f"cs op {d_op} is inconsistent with CIGAR")
+
+                take = min(need, remain)
+
+                if d_op == "=":
+                    out.append(Segment("match", "=", take, take, take))
+                elif d_op == "X":
+                    out.append(Segment("mismatch", "X", take, take, take))
+                elif d_op == "I":
+                    seq = d_seq[d_off:d_off + take] if d_seq is not None else None
+                    out.append(Segment("ins", "I", take, 0, take, read_seq=seq))
+                elif d_op == "D":
+                    out.append(Segment("del", "D", take, take, 0))
+                elif d_op == "N":
+                    out.append(Segment("ref_skip", "N", take, take, 0))
+
+                need -= take
+                d_off += take
+                if d_off == d_len:
+                    d_idx += 1
+                    d_off = 0
+
+        for op, l in ops:
+            if op == "M":
+                take_cs({"=", "X"}, l)
+            elif op == "=":
+                take_cs({"="}, l)
+            elif op == "X":
+                take_cs({"X"}, l)
+            elif op == "I":
+                take_cs({"I"}, l)
+            elif op == "D":
+                take_cs({"D"}, l)
+            elif op == "N":
+                take_cs({"N"}, l)
+            elif op == "S":
+                out.append(Segment("soft", "S", l, 0, l))
+            elif op == "H":
+                out.append(Segment("hard", "H", l, 0, 0))
+            elif op == "P":
+                out.append(Segment("pad", "P", l, 0, 0))
+            else:
+                raise ValueError("unsupported op")
+
         return merge_segments(out)
+
+    # MD path: keep one MD cursor across the entire CIGAR so that MD state is
+    # not restarted for each M block.
     detail = parse_md(md) if md else None
+    md_idx = 0
+    md_off = 0
+
+    def skip_empty_md():
+        nonlocal md_idx, md_off
+        while detail and md_idx < len(detail) and detail[md_idx][1] - md_off == 0:
+            md_idx += 1
+            md_off = 0
+
+    def take_md_aligned(need, emit=True):
+        nonlocal md_idx, md_off
+        while need > 0:
+            skip_empty_md()
+            if not detail or md_idx >= len(detail):
+                raise ValueError("MD tag is shorter than CIGAR")
+
+            d_op, d_len = detail[md_idx]
+            if d_op == "D":
+                raise ValueError("unexpected MD deletion inside aligned CIGAR block")
+
+            remain = d_len - md_off
+            take = min(need, remain)
+
+            if emit:
+                if d_op == "=":
+                    out.append(Segment("match", "=", take, take, take))
+                elif d_op == "X":
+                    out.append(Segment("mismatch", "X", take, take, take))
+
+            need -= take
+            md_off += take
+            if md_off == d_len:
+                md_idx += 1
+                md_off = 0
+
+    def take_md_deletion(need):
+        nonlocal md_idx, md_off
+        while need > 0:
+            skip_empty_md()
+            if not detail or md_idx >= len(detail):
+                raise ValueError("MD tag is shorter than CIGAR deletion")
+
+            d_op, d_len = detail[md_idx]
+            if d_op != "D":
+                raise ValueError("CIGAR deletion is inconsistent with MD tag")
+
+            remain = d_len - md_off
+            take = min(need, remain)
+            need -= take
+            md_off += take
+            if md_off == d_len:
+                md_idx += 1
+                md_off = 0
+
     for op, l in ops:
-        if op in ("=", "X"):
-            t = "match" if op == "=" else "mismatch"
-            out.append(Segment(t, op, l, l, l))
-        elif op == "M":
+        if op == "M":
             if detail:
-                k = 0
-                rem = l
-                while rem > 0 and k < len(detail):
-                    d_op, d_len = detail[k]
-                    take = min(rem, d_len)
-                    if d_op == "=":
-                        out.append(Segment("match", "=", take, take, take))
-                    elif d_op == "X":
-                        out.append(Segment("mismatch", "X", take, take, take))
-                    elif d_op == "D":
-                        out.append(Segment("del", "D", take, take, 0))
-                    rem -= take
-                    if take == d_len:
-                        k += 1
-                    else:
-                        detail[k] = (d_op, d_len - take)
+                take_md_aligned(l, emit=True)
             else:
                 out.append(Segment("match", "M", l, l, l))
+
+        elif op in ("=", "X"):
+            if detail:
+                # Keep the MD cursor synchronized even though =/X are already
+                # explicit in the CIGAR.
+                take_md_aligned(l, emit=False)
+            t = "match" if op == "=" else "mismatch"
+            out.append(Segment(t, op, l, l, l))
+
         elif op == "I":
             out.append(Segment("ins", "I", l, 0, l))
+
         elif op == "D":
+            if detail:
+                take_md_deletion(l)
             out.append(Segment("del", "D", l, l, 0))
+
         elif op == "N":
+            # N is represented by CIGAR and is not consumed from MD.
             out.append(Segment("ref_skip", "N", l, l, 0))
+
         elif op == "S":
             out.append(Segment("soft", "S", l, 0, l))
+
         elif op == "H":
             out.append(Segment("hard", "H", l, 0, 0))
+
         elif op == "P":
             out.append(Segment("pad", "P", l, 0, 0))
+
         else:
             raise ValueError("unsupported op")
+
     return merge_segments(out)
 
 # Base-by-base alignment using CIGAR string, read sequence, and reference
