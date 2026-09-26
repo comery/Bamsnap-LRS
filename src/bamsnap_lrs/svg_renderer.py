@@ -1517,7 +1517,11 @@ def _phase_blocks_for_sample(
         hap_bases: Dict[int, List[Optional[str]]] = {}
         for i in idx_list:
             call = sites[i].sample_calls.get(sname)
-            if (call is not None and call.is_phased
+            # Haplotype assignment is SNV-only.  Phased indels/small variants
+            # remain available for VCF-track rendering and PS-span definition,
+            # but they must not contribute allele evidence to read assignment.
+            if (sites[i].is_snv
+                    and call is not None and call.is_phased
                     and call.phase_set == ps_id and call.hap_bases):
                 phased_idx.append(i)
                 hap_bases[sites[i].pos] = list(call.hap_bases)
@@ -2321,7 +2325,11 @@ def render_svg_snapshot(
             # match/mismatch segments that fall inside these spans.  Colored SNP
             # cells are still drawn on top.
             matched_px_spans: List[Tuple[int, int, str, float]] = []
-            if read_hap_blocks and not supplementary_read_styles.get(idx):
+            # In Highlight mode, every displayed alignment record (including
+            # supplementary/secondary records when enabled) is colored by its
+            # own block-specific haplotype assignment.  Alignment-level
+            # clustering is intentionally retained.
+            if read_hap_blocks:
                 for _blk in read_hap_blocks:
                     _hap = _read_matched_hap(r, _blk)
                     if _hap is None:
@@ -2341,6 +2349,11 @@ def render_svg_snapshot(
                 ))
 
             supp_style = supplementary_read_styles.get(idx)
+            # Supplementary/split-read body colors are useful in ordinary
+            # DNA/RNA views, but in Highlight mode the PS/haplotype color has
+            # priority.  Do not add a separate status color or outline here.
+            if svg_highlight_index:
+                supp_style = None
             supp_opacity = supp_style[1] if supp_style else None
             # Draw insertion blocks after the read body. If they are drawn in
             # segment order, the following match block can cover part of the
