@@ -2355,6 +2355,17 @@ def render_svg_snapshot(
             if svg_highlight_index:
                 supp_style = None
             supp_opacity = supp_style[1] if supp_style else None
+            # At broad scale with --overview-detail show, draw mismatches after
+            # the read body so an adjacent gray match block that maps to the
+            # same integer pixel cannot cover them. Keep the original drawing
+            # order for normal/zoomed-in rendering.
+            overlay_overview_mismatches = (
+                bp_per_px > AUTO_SIMPLIFY_BP_PER_PX
+                and not svg_highlight_index
+                and overview_detail == "show"
+            )
+            mismatch_overlays = []
+
             # Draw insertion blocks after the read body. If they are drawn in
             # segment order, the following match block can cover part of the
             # purple insertion because insertion consumes no reference pixels.
@@ -2552,10 +2563,16 @@ def render_svg_snapshot(
                                 current_color_hex = "#c3c3c3"
                         else:
                             current_color_hex = "#c3c3c3"
-                        SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
-                            x0_draw, y, x1_draw - x0_draw, read_height,
-                            current_color_hex, supp_opacity
-                        ))
+                        if overlay_overview_mismatches:
+                            mismatch_overlays.append(
+                                (x0_draw, x1_draw, y, read_height,
+                                 current_color_hex, supp_opacity)
+                            )
+                        else:
+                            SubElement(svg, "rect", _svg_rect_attrs_with_optional_opacity(
+                                x0_draw, y, x1_draw - x0_draw, read_height,
+                                current_color_hex, supp_opacity
+                            ))
                     else:
                         # Highlight-aware SVG mismatch rendering.
                         if supp_style:
@@ -2611,6 +2628,16 @@ def render_svg_snapshot(
                                 "width": str(x1_draw - x0_draw), "height": str(read_height),
                                 "fill": color_hex, "stroke": "none"
                             })
+
+            # Only broad-scale --overview-detail show uses this mismatch overlay.
+            # Normal rendering keeps the original segment-by-segment order.
+            for mm_x0, mm_x1, mm_y, mm_h, mm_color, mm_opacity in mismatch_overlays:
+                mm_attrs = _svg_rect_attrs_with_optional_opacity(
+                    mm_x0, mm_y, max(1, mm_x1 - mm_x0), mm_h,
+                    mm_color, mm_opacity
+                )
+                mm_attrs["pointer-events"] = "none"
+                SubElement(svg, "rect", mm_attrs)
 
             # Draw insertion blocks last so adjacent match blocks cannot cover them.
             for ins_x0, ins_x1, ins_y, ins_h, ins_color, ins_label, ins_opacity in insertion_overlays:
