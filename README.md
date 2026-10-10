@@ -1,10 +1,10 @@
-# Bamsnap-LRS
+# BamSnap-LRS
 
 **A static genome browser for long-read sequencing data**
 
-Bamsnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
+BamSnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
 
-> **Scope:** Bamsnap-LRS focuses on genomic intervals within a shared reference assembly. It does not provide a dedicated cross-chromosome translocation/breakend (BND) viewer.
+> **Scope:** BamSnap-LRS focuses on genomic intervals within a shared reference assembly. It does not provide a dedicated cross-chromosome translocation/breakend (BND) viewer.
 
 ## Contents
 
@@ -59,13 +59,13 @@ Bamsnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignmen
 ### Install from source
 
 ```bash
-git clone https://github.com/comery/Bamsnap-LRS.git
-cd Bamsnap-LRS
+git clone https://github.com/comery/BamSnap-LRS.git
+cd BamSnap-LRS
 pip install -r requirements.txt
-chmod +x bin/bamsnap-lrs
+chmod +x bin/BamSnap-LRS
 ```
 
-Run commands from the repository root with `python bin/bamsnap-lrs` (or `./bin/bamsnap-lrs`).
+Run commands from the repository root with `python bin/BamSnap-LRS` (or `./bin/BamSnap-LRS`).
 
 ## Input files and indexes
 
@@ -88,7 +88,7 @@ BAM/CRAM inputs are retrieved by genomic interval and must be indexed. BED, GFF/
 ### Basic Usage (DNA)
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --fa example/chm13v2.chrM.fasta \
@@ -99,7 +99,7 @@ python bin/bamsnap-lrs dna \
 ### RNA Analysis
 
 ```bash
-python bin/bamsnap-lrs rna \
+python bin/BamSnap-LRS rna \
     --bam example/rna/test.rna.bam \
     --pos Cdec_SDR_X:200000-300000 \
     --out rna_snapshot.svg \
@@ -111,7 +111,7 @@ RNA mode displays spliced alignments and splice-junction arcs.
 ### Batch Region Plotting from BED/VCF
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/sim.mapping.sort.bam \
     --regions example/test_regions.vcf \
     --out-prefix example/batch.svg \
@@ -124,7 +124,7 @@ Batch mode requires `--regions` and `--out-prefix`. Outputs are named `<prefix>_
 ### Structural Variant Snapshot Example
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/SV_show/insertion.HIFI.bam \
     --bam example/SV_show/insertion.ONT.bam \
     --bam example/SV_show/insertion.Cyclone.bam \
@@ -139,7 +139,7 @@ Use `--show-supp` to display supplementary alignments, particularly useful for i
 ### VCF Highlight Example
 
 ```bash
-python bin/bamsnap-lrs highlight \
+python bin/BamSnap-LRS highlight \
     --bam example/highlight/sample1.hignlignt.bam \
     --bam example/highlight/sample2.hignlignt.bam \
     --pos chr21:20462000-20467000 \
@@ -232,7 +232,7 @@ GFF/GTF gene models show exons, CDS, and strand; `--gff-display transcript` sepa
 ### Using MD/CS Tags
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --out tags.svg --use-md
@@ -243,7 +243,7 @@ Mismatch resolution prioritizes reference FASTA with CIGAR, then enabled `cs`, t
 ### Using a Reference FASTA
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --fa example/chm13v2.chrM.fasta \
@@ -253,7 +253,7 @@ python bin/bamsnap-lrs dna \
 ### Customizing Appearance
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --out custom.svg \
@@ -264,7 +264,7 @@ python bin/bamsnap-lrs dna \
 ### Manual SV Padding
 
 ```bash
-python bin/bamsnap-lrs dna \
+python bin/BamSnap-LRS dna \
     --bam example/SV_show/deletion.HIFI.bam \
     --regions example/SV_show/deletion.vcf \
     --out-prefix example/SV_show/deletion.custom.svg \
@@ -285,9 +285,9 @@ Add `--no-hap-sort` to disable haplotype-signature clustering, or use `--hap-lay
 
 ![JBrowse screenshot](example/ScreenShot_jbrowse.png)
 
-**Bamsnap-LRS**
+**BamSnap-LRS**
 
-![Bamsnap-LRS SVG](example/chrM_1000_3000.gff.bamsnapLRS.svg)
+![BamSnap-LRS SVG](example/chrM_1000_3000.gff.bamsnapLRS.svg)
 
 ### RNA Mode Visualization
 
@@ -315,7 +315,7 @@ Add `--no-hap-sort` to disable haplotype-signature clustering, or use `--hap-lay
 
 ![Highlighted SNVs and haplotype linkage](example/highlight/highlight_exam/highlight.one.bam.svg)
 
-More examples and evaluation workflows are available in the [Bamsnap-LRS visualization gallery](https://wanyi0309.github.io/Bamsnap-LRS_visualization_gallery/) and its [GitHub repository](https://github.com/wanyi0309/Bamsnap-LRS_visualization_gallery).
+More examples and evaluation workflows are available in the [BamSnap-LRS visualization gallery](https://wanyi0309.github.io/BamSnap-LRS_visualization_gallery/) and its [GitHub repository](https://github.com/wanyi0309/BamSnap-LRS_visualization_gallery).
 
 ## 📄 License
 
