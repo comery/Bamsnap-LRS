@@ -1,5 +1,5 @@
 # BamSnap-LRS
-[![DOI](https://zenodo.org/badge/735032212.svg)](https://doi.org/10.5281/zenodo.23277809)
+v2.0.0 [![DOI](https://zenodo.org/badge/735032212.svg)](https://doi.org/10.5281/zenodo.23277809)
 
 **A static genome browser for long-read sequencing data**
 
