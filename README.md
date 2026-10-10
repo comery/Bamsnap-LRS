@@ -2,9 +2,21 @@
 
 **A static genome browser for long-read sequencing data**
 
-Bamsnap-LRS is a command-line tool for generating  snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
+Bamsnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
 
 > **Scope:** Bamsnap-LRS focuses on genomic intervals within a shared reference assembly. It does not provide a dedicated cross-chromosome translocation/breakend (BND) viewer.
+
+## Contents
+
+- [Key Features](#-key-features)
+- [Installation](#-installation)
+- [Input files and indexes](#input-files-and-indexes)
+- [Quick Start](#-quick-start)
+- [Command Reference](#-command-reference)
+- [Visual Elements](#-visual-elements)
+- [Advanced Usage](#-advanced-usage)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
 
 ## ✨ Key Features
 
@@ -153,7 +165,8 @@ For phased read coloring, provide a VCF with phased `GT` (`|`) and phase-set `PS
 | `--mapq` | Minimum mapping quality | `0` |
 | `--show-supp` / `--show-secondary` | Include supplementary / secondary alignments | Off |
 | `--width` | Image width in pixels. | 1200 |
-| `--read-height` | Height of each read in pixels. | 6 || `--detail` | `low`, `mid`, `high` (higher levels show more alignment detail/indel labels) | `mid` |
+| `--read-height` | Height of each read in pixels. | 6 |
+| `--detail` | `low`, `mid`, `high` (higher levels show more alignment detail/indel labels) | `mid` |
 | `--overview-detail` | `hide` or `show` small differences in wide genomic windows | `hide` |
 | `--use-md` / `--use-cs` | Use MD / cs tag to detect mismatches. | Off |
 | `--show-axis` | Show genomic coordinate axis | Off |
