@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ====================== auto check FASTA file ======================
-FASTA_FILE="chm13v2.0.fasta"
+FASTA_FILE="/data/work/00.data/chm13v2.0.fa"
 
 if [ -f "$FASTA_FILE" ]; then
     echo "reference exist $FASTA_FILE, run command with --fa"
@@ -18,26 +18,26 @@ python  ../../bin/bamsnap-lrs dna \
   --regions insertion.vcf  --out-prefix insertion.svg  --show-axis --show-coverage --padding 50  \
   $FASTA_ARG 
 python  ../../bin/bamsnap-lrs dna \
-  --bam insertion.HIFI.bam --regions insertion.vcf  --out-prefix insertion.onebam.svg  --show-axis --show-coverage --padding 50  \
-  $FASTA_ARG
+  --bam insertion.HIFI.bam --regions insertion.vcf  --out-prefix insertion.onebam.svg  --show-axis --show-coverage --padding 50 --overview-detail show \
+  $FASTA_ARG 
 
 ## deletion
 python  ../../bin/bamsnap-lrs dna \
   --bam deletion.Cyclone.bam --bam deletion.HIFI.bam --bam deletion.ONT.bam \
-  --regions deletion.vcf  --out-prefix deletion.svg  --show-axis --show-coverage \
+  --regions deletion.vcf  --out-prefix deletion.svg  --show-axis --show-coverage  --overview-detail show\
   $FASTA_ARG
   
 python  ../../bin/bamsnap-lrs dna \
-  --bam deletion.HIFI.bam --regions deletion.vcf  --out-prefix deletion.onebam.svg  --show-axis --show-coverage \
+  --bam deletion.HIFI.bam --regions deletion.vcf  --out-prefix deletion.onebam.svg  --show-axis --show-coverage  --overview-detail show\
   $FASTA_ARG
 
 ## duplication
 python  ../../bin/bamsnap-lrs dna \
-  --bam duplication.HIFI.bam --regions duplication.vcf --out-prefix duplication.svg --show-axis --show-coverage --show-supp \
+  --bam duplication.HIFI.bam --regions duplication.vcf --out-prefix duplication.svg --show-axis --show-coverage --show-supp  --overview-detail show\
   $FASTA_ARG
 
 ## inversion
 python  ../../bin/bamsnap-lrs dna \
-  --bam inversion.HIFI.bam --regions inversion.vcf --out-prefix inversion.svg --show-axis --show-coverage --show-supp \
+  --bam inversion.HIFI.bam --regions inversion.vcf --out-prefix inversion.svg --show-axis --show-coverage --show-supp  --overview-detail show\
   $FASTA_ARG
 
