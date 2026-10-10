@@ -279,7 +279,6 @@ Add `--no-hap-filter` to retain reads without highlighted-site overlap.
 
 Add `--no-hap-sort` to disable haplotype-signature clustering, or use `--hap-layout row` to give each alignment its own row while preserving cluster order.
 
-
 ### Visual Comparison
 
 **JBrowse**
