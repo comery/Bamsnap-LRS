@@ -1,266 +1,324 @@
-# BamSnap-LRS
+# Bamsnap-LRS
 
-**Static visualization of long-read sequencing alignments**
+**A static, JBrowse-style genome browser for long-read sequencing data**
 
-BamSnap-LRS is a command-line tool for generating genome-browser-style snapshots from long-read BAM/CRAM alignments. It supports visualization of DNA alignment views, structural variants, spliced transcript alignments, and SNV linkage, annotation tracks, and batch export to SVG, PDF, or PNG. Figures are generated without a browser or web server.
+Bamsnap-LRS is a command-line tool for generating publication-ready snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
 
-It is designed for static visualization and manual inspection, **not** for variant calling or computational haplotype phasing.
+> **Scope:** Bamsnap-LRS focuses on genomic intervals within a shared reference assembly. It does not provide a dedicated cross-chromosome translocation/breakend (BND) viewer.
 
-## Contents
+## ✨ Key Features
 
-- [Features](#features)
-- [Installation](#installation)
-- [Input files and indexes](#input-files-and-indexes)
-- [Quick start](#quick-start)
-- [How the visualization modes work](#how-the-visualization-modes-work)
-- [Command-line options](#command-line-options)
-- [Examples and gallery](#examples-and-gallery)
-- [Limitations and troubleshooting](#limitations-and-troubleshooting)
-- [Acknowledgments](#acknowledgments)
+### JBrowse-Style Visualization
+- Read pileups, coverage and base-composition tracks, genomic axes, and nucleotide-colored mismatches.
+- Static, customizable figures suitable for publications and batch workflows.
 
-## Features
+### Long-Read Support
+- PacBio HiFi/CLR and Oxford Nanopore BAM/CRAM alignments.
+- Optional supplementary/secondary alignments; records sharing a read name are grouped and colored by alignment order.
+- Multiple BAM/CRAM files shown as separate tracks on the same reference coordinates.
 
-- **DNA and RNA read views:** aligned blocks, mismatches, insertions, deletions, clipping, strand indicators, coverage, and RNA splice junctions.
-- **Long-read split alignments:** optional display of supplementary and secondary alignments; visible segments belonging to the same read can be distinguished in the standard read view.
-- **SV snapshots:** one or many loci from BED/VCF, automatic or user-defined flanking windows, and shading of the target interval. Intended primarily for INS, DEL, DUP, and INV inspection.
-- **VCF Highlight mode:** displays specified VCF sites and genotype/phase-set information, emphasizes alleles on the aligned reads, and groups reads by their observed phase-block signatures.
-- **Annotations:** BED3–BED12 features or GFF/GTF annotations.
-- **Multiple alignment tracks:** a separate track and coverage profile for each BAM/CRAM file.
-- **Consistent exports:** SVG is the rendering source for SVG, PDF, and PNG output.
+### Structural Variant Snapshot Support
+- Batch snapshots from BED or VCF regions, including INS, DEL, INV, and DUP examples.
+- Automatic flanking windows and shaded target intervals; override padding with `--padding`.
 
-## Installation
+### VCF Highlight Mode
+- Highlights **SNVs** from a VCF, with per-sample REF/ALT or phased-haplotype tracks.
+- Groups reads by phase-block-specific haplotype signatures and colors informative read segments.
+- Mutes non-target alignment differences; provides read-assignment summaries in the console.
+
+### Gene and Feature Annotation
+- GFF/GTF gene or transcript models (`--gff-display gene|transcript`) and BED features.
+
+### Variant Visualization
+- Resolves mismatches using a reference FASTA, enabled `cs` or `MD` tags, or explicit CIGAR `=`/`X` operations.
+- Shows insertions, deletions, orientation, and RNA splice/reference-skip events.
+
+### Multiple Output Formats
+- **SVG** (native), **PNG**, and **PDF** (both converted from SVG using CairoSVG).
+
+## 📦 Installation
 
 ### Requirements
-
 - Python 3.8+
-- Packages in [`requirements.txt`](requirements.txt): `pysam`, and `cairosvg`
-- Optional: `pyfaidx` for efficient FASTA random access; without it, a plain-text FASTA fallback is used
+- [`pysam`](https://pysam.readthedocs.io/) and [`CairoSVG`](https://cairosvg.org/), installed from `requirements.txt`
+- Optional: `pyfaidx` for indexed FASTA access; a built-in uncompressed-FASTA reader is used if unavailable
+
+Pillow is **not** required by the active SVG-based rendering pipeline.
+
+### Install from source
 
 ```bash
 git clone https://github.com/comery/Bamsnap-LRS.git
 cd Bamsnap-LRS
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 chmod +x bin/bamsnap-lrs
-
-# Check commands and all available flags
-python bin/bamsnap-lrs --help
-python bin/bamsnap-lrs dna --help
-python bin/bamsnap-lrs rna --help
-python bin/bamsnap-lrs highlight --help
 ```
-Run from the cloned repository directory using `python bin/bamsnap-lrs ...` or `./bin/bamsnap-lrs ...`. 
+
+Run commands from the repository root with `python bin/bamsnap-lrs` (or `./bin/bamsnap-lrs`).
 
 ## Input files and indexes
 
-| Input | Supported format | Index requirement | Notes |
-|---|---|---|---|
-| Alignments (`--bam`) | Coordinate-sorted BAM or CRAM | **Required:** BAM `.bai`/`.csi` or CRAM `.crai`| A reference FASTA is recommended for CRAM decoding. |
-| Reference (`--fa`) | Uncompressed FASTA (`.fa`/`.fasta`) | **No pre-existing `.fai` required** | A reference FASTA is recommended for CRAM decoding. |
-| Annotation (`--bed`) | Plain or gzip/BGZF-compressed BED | **No `.tbi`/`.csi` required** | BED3–BED12-style features. |
-| Annotation (`--gff`) | Plain or gzip/BGZF-compressed GFF/GTF | **No `.tbi`/`.csi` required** | GFF/GTF is read sequentially; use `--gff-display gene|transcript`. |
-| Batch loci (`--regions`) | BED, BED.gz, VCF, VCF.gz | **No `.tbi`/`.csi` required** | Compression is recognized by the `.gz` filename suffix; BGZF can be read as gzip. |
-| Highlight sites (`--highlight-vcf`) | VCF, VCF.gz | **No `.tbi`/`.csi` required** | Supports multi-sample VCF and `GT`/`PS` for display. |
+| Input | Usage | Supported files | Index required? |
+| --- | --- | --- | --- |
+| BAM / CRAM | `--bam` | Coordinate-sorted `.bam` / `.cram` | **Yes** — BAM: `.bai` or `.csi`; CRAM: `.crai` or `.csi` |
+| BED | `--bed`, `--regions` | `.bed`, `.bed.gz` (gzip/BGZF) | **No** (`.tbi`/`.csi` not needed) |
+| GFF / GTF | `--gff` | `.gff`, `.gtf`, `.gff.gz`, `.gtf.gz` (gzip/BGZF) | **No** (`.tbi`/`.csi` not needed) |
+| VCF | `--regions`, `--highlight-vcf` | `.vcf`, `.vcf.gz` (gzip/BGZF) | **No** (`.tbi`/`.csi` not needed) |
+| Reference FASTA | `--fa` | **Uncompressed** `.fa`, `.fasta`, etc. | **No** pre-existing `.fai` required for plotting |
 
-**Coordinate conventions:** BED uses 0-based half-open intervals; VCF `POS` is 1-based. The batch parser converts VCF records into internal plotting intervals. Chromosome/contig names must match across the alignment, reference, and annotation files (for example, `chr1` and `1` are not automatically interchangeable).
+BAM/CRAM inputs are retrieved by genomic interval and must be indexed. BED, GFF/GTF, and VCF files are read sequentially, so compression is supported without a tabix index. For compressed region/VCF files, use the `.gz` suffix (for example, `regions.bed.gz` or `variants.vcf.gz`).
 
-**Multiple BAM/CRAM files:** all tracks use a shared genomic coordinate system and should be aligned to the same reference assembly. Each input file forms its own read track with its own coverage. The default track label is the input filename without its extension; override with `--track-title`. Track titles are **not** automatically inferred from BAM read-group (`RG`) sample tags.
+`--fa` enables reference-based mismatch detection and is recommended for CRAM decoding; without it, CRAM requires an accessible reference through the pysam/htslib environment. CRAM reference access may additionally rely on htslib FASTA indexing or caching. All alignment and annotation files must use the **same reference assembly and matching contig names** (for example, `chr1` is not automatically mapped to `1`). Multiple BAM/CRAM files become separate tracks, labeled by filename without extension unless `--track-title` is supplied; sample names are not inferred from BAM read-group metadata.
 
-## Quick start
+**Coordinates:** BED uses 0-based, half-open intervals; GFF/GTF and VCF use their native 1-based coordinates and are converted internally. `--pos chr:start-end` is interpreted as `[start, end)`; `--pos chr:pos` displays a window of up to 500 bp around the specified coordinate.
 
-### 1. DNA snapshot
+## 🚀 Quick Start
+
+### Basic Usage (DNA)
 
 ```bash
 python bin/bamsnap-lrs dna \
     --bam example/sim.mapping.sort.bam \
     --pos chrM:1000-3000 \
     --fa example/chm13v2.chrM.fasta \
-    --out dna.svg \
-    --show-axis
+    --show-axis \
+    --out snapshot.svg
 ```
 
-### 2. RNA splicing and transcript annotations
+### RNA Analysis
 
 ```bash
 python bin/bamsnap-lrs rna \
-    --bam aligned_rna.bam \
-    --pos chr1:1000000-1005000 \
-    --gff annotation.gtf.gz \
-    --gff-display transcript \
-    --out rna.svg \
+    --bam example/rna/test.rna.bam \
+    --pos Cdec_SDR_X:200000-300000 \
+    --out rna_snapshot.svg \
     --show-axis
 ```
 
-Replace the example input paths with your own data. `--gff-display gene` (the default) displays collapsed gene models; `transcript` draws individual transcript models.
+RNA mode displays spliced alignments and splice-junction arcs.
 
-### 3. Batch SV snapshots from a VCF
+### Batch Region Plotting from BED/VCF
 
 ```bash
 python bin/bamsnap-lrs dna \
-    --bam hifi.bam ont.bam \
-    --regions variants.vcf.gz \
-    --out-prefix results/sv.svg \
-    --fa reference.fa \
-    --show-supp \
+    --bam example/sim.mapping.sort.bam \
+    --regions example/test_regions.vcf \
+    --out-prefix example/batch.svg \
+    --fa example/chm13v2.chrM.fasta \
     --show-axis
 ```
 
-Batch mode requires `--regions` and `--out-prefix`. For each input record, the program writes a file named `<prefix>_<chrom>_<plot_start>_<plot_end>.svg` (or `.pdf`/`.png` if that extension was supplied). The output directory is created if needed. Failed or empty regions are reported rather than ending the whole DNA batch.
+Batch mode requires `--regions` and `--out-prefix`. Outputs are named `<prefix>_<chrom>_<plot-start>_<plot-end>.<format>`; the coordinates include any automatic or user-specified padding.
 
-### 4. Highlight phased SNVs in a VCF
+### Structural Variant Snapshot Example
+
+```bash
+python bin/bamsnap-lrs dna \
+    --bam example/SV_show/insertion.HIFI.bam \
+    --bam example/SV_show/insertion.ONT.bam \
+    --bam example/SV_show/insertion.Cyclone.bam \
+    --regions example/SV_show/insertion.vcf \
+    --out-prefix example/SV_show/insertion.svg \
+    --show-axis \
+    --show-supp
+```
+
+Use `--show-supp` to display supplementary/split alignments, particularly useful for inversions and duplications.
+
+### VCF Highlight Example
 
 ```bash
 python bin/bamsnap-lrs highlight \
-    --bam phased_reads.bam \
-    --pos chr21:20000000-20002000 \
-    --highlight-vcf phased_sites.vcf.gz \
-    --fa reference.fa \
-    --hap-layout packed \
-    --out highlight.svg
+    --bam example/highlight/sample1.hignlignt.bam \
+    --bam example/highlight/sample2.hignlignt.bam \
+    --pos chr21:20462000-20467000 \
+    --highlight-vcf example/highlight/region_chr21.vcf \
+    --out example/highlight/highlight.svg
 ```
 
-Highlight mode defaults to a high-detail view, shows the coordinate axis, hides reads not intersecting highlighted sites, and clusters reads according to observed variant-site patterns. Use `--highlight-samples SAMPLE_A SAMPLE_B` to select samples from a multi-sample VCF.
+For phased read coloring, provide a VCF with phased `GT` (`|`) and phase-set `PS` information.
 
-### 5. Retain base-level differences in a wide window
+## 📖 Command Reference
+
+### `dna` / `rna` — Generate genome snapshots
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--bam` | One or more indexed BAM/CRAM files; use repeatedly or list paths | Required |
+| `--pos` / `--regions` | Single interval / BED or VCF batch file (mutually exclusive) | One required |
+| `--out` / `--out-prefix` | Output filename / batch prefix | Required for corresponding mode |
+| `--padding` | Flanking bases for BED/VCF regions | Inferred automatically |
+| `--fa` | Reference FASTA (uncompressed) | None |
+| `--mapq` | Minimum mapping quality | `0` |
+| `--show-supp` / `--show-secondary` | Include supplementary / secondary alignments | Off |
+| `--width` / `--read-height` | Figure width / read height, in pixels | `1200` / `6` |
+| `--detail` | `low`, `mid`, `high` (higher levels show more alignment detail/indel labels) | `mid` |
+| `--overview-detail` | `hide` or `show` small differences in wide genomic windows | `hide` |
+| `--use-md` / `--use-cs` | Enable mismatch resolution from MD / cs tags | Off |
+| `--show-axis` | Show genomic coordinate axis | Off |
+| `--show-coverage` / `--no-coverage` | Show / hide coverage track | On |
+| `--coverage-height` / `--coverage-max-depth` | Coverage track height / plotted depth limit | `15` / auto |
+| `--show-composition` | Add base-composition chart | Off |
+| `--comp-height` / `--comp-max-depth` | Composition chart height / depth limit | Auto |
+| `--track-title` | Custom title(s) for BAM/CRAM tracks | Filename stem |
+| `--gff` / `--bed` | Gene annotation / BED annotation (mutually exclusive) | None |
+| `--gff-display` | `gene` (collapsed) or `transcript` (individual models) | `gene` |
+| `--style` | `jbrowse` or `default` | `jbrowse` |
+| `--color-by` | `type`, `base`, `strand`, or `mapq` | `type` |
+| `--hide-insertions` | De-emphasize insertion marks and labels | Off |
+| `--show-insertion-labels` / `--no-insertion-labels` | Enable / disable insertion labels | On |
+
+Reads passing the requested filters are displayed without an additional read-downsampling limit; the older `--max-reads` and `--downsample-strategy` options are no longer available.
+
+### `highlight` — Highlight VCF SNVs on reads
+
+`highlight` accepts the common options above, plus:
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--highlight-vcf` | VCF with target SNVs | Required |
+| `--highlight-samples` | Select VCF samples | All samples |
+| `--mode` | `dna` or `rna` | `dna` |
+| `--no-hap-sort` | Disable phase-signature read clustering | Off (clustering on) |
+| `--no-hap-filter` | Keep reads without highlighted-site overlap | Off (filtering on) |
+| `--hap-layout` | `packed` (reuse non-overlapping rows) or `row` (one alignment per row) | `packed` |
+
+Highlight mode defaults to `--detail high` and enables the coordinate axis. Only SNVs are visualized in this mode; indels and other non-SNV records are not drawn as highlight sites.
+
+## 🎨 Visual Elements
+
+### Coverage Track
+Read depth and nucleotide composition: reference-matching bases are gray; non-reference A/C/G/T are red/blue/green/orange.
+
+### Read Track
+Gray read bodies indicate aligned matches; colored blocks show mismatches; purple marks show insertions; dark gray spans mark deletions. Thin lines indicate reference skips, with splice arcs in RNA mode. Arrowheads indicate alignment strand. At broad scales, small differences are simplified by default; `--overview-detail show` retains them.
+
+### Supplementary / Split-Read Coloring
+Visible alignments with the same query name share a group color. Opacity follows their inferred order along the original read, making split alignments easier to trace.
+
+### Structural Variant Focus Region
+A pale background marks the BED/VCF target within its padded plotting window. By default, small variants and insertions receive compact flanks, while longer variants receive wider flanks.
+
+### VCF Highlight Track
+Shows target SNVs and per-sample REF/ALT or haplotype alleles. Phased genotypes with `GT` and `PS` are grouped into phase blocks; haplotypes within a sample are distinguished by opacity.
+
+### Highlight-Aware Read Track
+Only bases at highlighted SNVs retain nucleotide-specific colors; unrelated mismatches and indels are muted. Reads are clustered by **phase-block-specific signatures**: `h1`/`h2`/... for unique assignments, `U` for ambiguous assignments, and `.` for blocks with no valid observation. A read may have different assignments in different blocks; ambiguous regions remain gray. Console `[HIGHLIGHT-SUMMARY]` lines report assigned, complex, unassigned, and non-informative read counts per track/region.
+
+### Coordinate Axis
+Genomic tick labels and guide lines, enabled with `--show-axis` (on by default in Highlight mode).
+
+### Gene Annotation Track
+GFF/GTF gene models show exons, CDS, and strand; `--gff-display transcript` separates transcript isoforms.
+
+### BED Annotation Track
+`--bed` draws BED features, including block structures from BED12 where present.
+
+## 🔧 Advanced Usage
+
+### Using MD/CS Tags
 
 ```bash
 python bin/bamsnap-lrs dna \
-    --bam aligned_reads.bam \
-    --pos chr5:705000-710000 \
-    --fa reference.fa \
-    --overview-detail show \
-    --out overview.svg
+    --bam example/sim.mapping.sort.bam \
+    --pos chrM:1000-3000 \
+    --out tags.svg --use-md
 ```
 
-By default, the renderer simplifies base-level differences when the scale is broader than one base per pixel. `--overview-detail show` requests that mismatches and small indel details remain visible at these scales. Dense details can overlap because multiple bases project onto a single pixel.
+Mismatch resolution prioritizes reference FASTA with CIGAR, then enabled `cs`, then enabled `MD`, and finally CIGAR-only information. Without a reference or an enabled/available tag, ambiguous CIGAR `M` operations are not resolved into individual mismatches.
 
-## How the visualization modes work
+### Using a Reference FASTA
 
-### DNA and RNA
+```bash
+python bin/bamsnap-lrs dna \
+    --bam example/sim.mapping.sort.bam \
+    --pos chrM:1000-3000 \
+    --fa example/chm13v2.chrM.fasta \
+    --out reference.svg
+```
 
-The DNA view renders reads along the reference with optional mismatch, insertion, deletion, clipping, orientation, and supplementary-alignment information. The RNA view additionally shows splice-aware alignment features and junction arcs. Read inclusion is controlled by `--mapq`, `--show-supp`, and `--show-secondary`.
+### Customizing Appearance
 
-To identify mismatches within generic CIGAR `M` blocks, the program can compare aligned read bases against `--fa`, or use `--use-cs` and/or `--use-md`. If a reference sequence is available, reference-based decoding takes precedence; otherwise `cs` takes precedence over `MD` when both are requested. Without these information sources, CIGAR alone cannot resolve individual mismatches in `M` blocks.
+```bash
+python bin/bamsnap-lrs dna \
+    --bam example/sim.mapping.sort.bam \
+    --pos chrM:1000-3000 \
+    --out custom.svg \
+    --width 1600 --read-height 8 \
+    --coverage-height 30 --overview-detail show
+```
 
-### SV batch windows
+### Manual SV Padding
 
-BED records provide 0-based target intervals. For VCF records, the program uses available `SVTYPE`, `END`, and `SVLEN` information, as well as REF/ALT lengths, to infer plotting intervals. The target area is shaded within a larger window. `--padding N` overrides automatic padding on both sides. Insertions and small VCF variants normally receive compact flanking windows, whereas larger SVs receive larger windows.
+```bash
+python bin/bamsnap-lrs dna \
+    --bam example/SV_show/deletion.HIFI.bam \
+    --regions example/SV_show/deletion.vcf \
+    --out-prefix example/SV_show/deletion.custom.svg \
+    --padding 1000 --show-supp
+```
 
-**Scope:** SV figures show alignment evidence; they do not validate an SV call by themselves. No dedicated cross-chromosome breakend/translocation drawing is provided. Imprecise confidence intervals such as `CIPOS`/`CIEND` are not used to draw separate uncertainty bounds; complex or inconsistent SV fields should be reviewed before batch generation.
+### Keeping All Reads in Highlight Mode
 
-### VCF Highlight mode
+Add `--no-hap-filter` to retain reads without highlighted-site overlap.
 
-The `highlight` command adds a VCF Highlights annotation track. At targeted SNV positions, observed read bases are emphasized while non-target differences are visually muted. A phased sample requires phased `GT` (with `|`) and a valid `PS` to define phase-set-specific haplotype rows. Unphased records use REF/ALT-style rows.
+### Disabling Haplotype Sorting in Highlight Mode
 
-Within each phase block, a read is assigned to a haplotype only if its observed informative alleles uniquely support that haplotype. Conflicting, non-informative, or missing site evidence does not produce a forced assignment. Each phase block is assessed independently: a read spanning several blocks may have different haplotype states across segments. The layout groups reads by these block-specific signatures, rather than claiming a globally phased haplotype for the whole read.
+Add `--no-hap-sort` to disable haplotype-signature clustering, or use `--hap-layout row` to give each alignment its own row while preserving cluster order.
 
-Highlight-specific controls:
+## 🆚 Comparison with JBrowse
 
-- `--no-hap-sort` retains coordinate-based stacking instead of variant-signature clustering.
-- `--no-hap-filter` keeps reads that do not overlap target VCF sites.
-- `--hap-layout packed` (default) reuses rows among nonoverlapping reads within a cluster; `--hap-layout row` keeps one alignment per row.
-- `--highlight-samples` restricts the displayed VCF samples, not the BAM records by read group.
-- `--mode rna` uses the RNA rendering pipeline for Highlight mode.
+JBrowse is an interactive genome browser; Bamsnap-LRS generates static, scriptable snapshots with a JBrowse-inspired visual style. It is intended for reproducible figures and batch processing, not as a replacement for interactive browsing.
 
-The command also reports Highlight summary counts (including reads covering valid target SNVs, haplotype-assigned reads, mixed-block patterns, and unassigned reads) to help interpret what is actually represented in the figure. These are read-level display/assignment summaries, not haplotype calls.
+| Feature | JBrowse | Bamsnap-LRS |
+| --- | --- | --- |
+| Main interface | Interactive browser | Command-line snapshot generation |
+| Output | Interactive display and export options | SVG, PNG, PDF |
+| Multi-region automation | Depends on workflow | `--regions` batch mode |
+| Long-read evidence | Interactive alignment inspection | Static read, splice, SV and SNV-linkage views |
 
-## Command-line options
+### Visual Comparison
 
-Use `python bin/bamsnap-lrs <mode> --help` for the authoritative current set. All three modes share the common flags below; the Highlight mode adds its own flags.
+**JBrowse**
 
-### Common options (`dna`, `rna`, and `highlight`)
+![JBrowse screenshot](example/ScreenShot_jbrowse.png)
 
-| Flag | Purpose | Default |
-|---|---|---|
-| `--bam FILE [FILE ...]` | One or more BAM/CRAM alignment tracks; can also be repeated | Required |
-| `--pos CHR:START-END` | Render one region (or `CHR:POS`) | Mutually exclusive with `--regions` |
-| `--regions FILE` | Batch regions in BED or VCF | Mutually exclusive with `--pos` |
-| `--out FILE` | Single-region output `.svg`, `.pdf`, or `.png` | Required with `--pos` |
-| `--out-prefix PREFIX` | Batch output prefix and extension | Required with `--regions` |
-| `--padding N` | Fixed flanks for batch regions | Automatic per region |
-| `--fa FILE` | Reference FASTA for mismatch comparison/CRAM | Optional for BAM; recommended for CRAM |
-| `--mapq N` | Minimum mapping quality | `0` |
-| `--show-supp` / `--show-secondary` | Include supplementary / secondary records | Off |
-| `--width N` | Output width in pixels | `1200` |
-| `--read-height N` | Read-body height | `6` |
-| `--detail low|mid|high` | Base/indel detail level | `mid` (`high` in Highlight) |
-| `--overview-detail hide|show` | Simplify or retain small features at overview scale | `hide` |
-| `--show-axis` | Coordinate axis | Off (`on` in Highlight) |
-| `--show-coverage` / `--no-coverage` | Per-track coverage display | On |
-| `--coverage-height N` | Height of coverage track | `15` |
-| `--coverage-max-depth N` | Set coverage plot depth maximum | Automatic |
-| `--show-composition` | Add a base-composition track | Off |
-| `--comp-height N` / `--comp-max-depth N` | Composition track sizing/depth | Automatic |
-| `--track-title TITLE [TITLE ...]` | Override one or more track labels | Filename stem |
-| `--gff FILE` / `--bed FILE` | Annotation input | Mutually exclusive |
-| `--gff-display gene|transcript` | Gene or transcript-level models for GFF/GTF | `gene` |
-| `--style default|jbrowse` | Visual style | `jbrowse` |
-| `--color-by type|base|strand|mapq` | Read coloring | `type` |
-| `--use-md` / `--use-cs` | Request MD/cs mismatch evidence | Off |
-| `--hide-insertions` | De-emphasize insertions | Off |
-| `--show-insertion-labels` / `--no-insertion-labels` | Insertion length labels | On |
+**Bamsnap-LRS**
 
-### Highlight-specific options
+![Bamsnap-LRS SVG](example/chrM_1000_3000.gff.bamsnapLRS.svg)
 
-| Flag | Purpose | Default |
-|---|---|---|
-| `--highlight-vcf FILE` | Target variant file | Required |
-| `--highlight-samples SAMPLE [SAMPLE ...]` | VCF samples to display | All |
-| `--mode dna|rna` | Alignment display mode | `dna` |
-| `--no-hap-sort` | Disable observed-signature clustering | Sorting enabled |
-| `--no-hap-filter` | Retain reads not intersecting target sites | Filtering enabled |
-| `--hap-layout packed|row` | Packed or one-alignment-per-row layout | `packed` |
+### RNA Mode Visualization
 
-> **Removed from the documented CLI:** `--max-reads` and `--downsample-strategy` appear in older README revisions but are currently commented out in `src/bamsnap_lrs/cli.py`. They should not be used unless reintroduced to the command-line parser.
+![RNA splice-junction visualization](example/rna/test.rna.svg)
 
-## Examples and gallery
+### Structural Variant Visualization
 
-The repository includes example commands in [`run_example.sh`](run_example.sh) and assets under [`example/`](example/).
-
-**Visual comparison with JBrowse**
-
-JBrowse browser view:
-
-![JBrowse comparison screenshot](example/ScreenShot_jbrowse.png)
-
-BamSnap-LRS static view:
-
-![BamSnap-LRS DNA example](example/chrM_1000_3000.gff.bamsnapLRS.svg)
-
-**RNA view**
-
-![BamSnap-LRS RNA example](example/rna/test.rna.svg)
-
-**Structural variants**
+**Insertion**
 
 ![Insertion example](example/SV_show/insertion.onebam_chrX_26021820_26021920.svg)
 
+**Deletion**
+
 ![Deletion example](example/SV_show/deletion.onebam_chr1_24314927_24320831.svg)
+
+**Inversion**
 
 ![Inversion example](example/SV_show/inversion_chrX_5770557_5773392.svg)
 
+**Duplication**
+
 ![Duplication example](example/SV_show/duplication_chr11_54871000_54876965.svg)
 
-**VCF Highlight view**
+### Highlight Mode Visualization
 
-![Highlight example](example/highlight/highlight_exam/highlight.one.bam.svg)
+![Highlighted SNVs and haplotype linkage](example/highlight/highlight_exam/highlight.one.bam.svg)
 
-For a broader and less selectively illustrated set of loci, see the [BamSnap-LRS visualization gallery](https://wanyi0309.github.io/Bamsnap-LRS_visualization_gallery/).
+More examples and evaluation workflows are available in the [Bamsnap-LRS visualization gallery](https://wanyi0309.github.io/Bamsnap-LRS_visualization_gallery/) and its [GitHub repository](https://github.com/wanyi0309/Bamsnap-LRS_visualization_gallery).
 
-## Limitations and troubleshooting
+## 📄 License
 
-- **Missing reads or empty region:** verify contig names, reference assembly, interval, `--mapq`, whether supplementary/secondary alignments need to be included, and whether the BAM/CRAM index is available.
-- **CRAM decoding:** provide the matching reference with `--fa` if decoding fails; pysam can sometimes locate references via CRAM header or reference environment settings.
-- **No displayed mismatches:** supply `--fa` or request available `--use-cs`/`--use-md` tags. For broad windows, try `--overview-detail show`.
-- **Annotation inputs:** `.gz` text files are supported for BED/GFF/GTF/VCF, but annotation and regions readers scan them sequentially; indexes are neither needed nor used for these files.
-- **VCF semantics:** batch visualization is optimized for within-chromosome examples; it is not a full SV normalization engine or an inter-chromosomal BND viewer. Inspect records with multiple ALT alleles, missing or inconsistent `END`/`SVLEN`, or uncertain breakpoints.
-- **Static output:** this is a figure-generation tool, not an interactive genome browser.
+This project is licensed under the MIT License.
 
-## License
+## 🙏 Acknowledgments
 
-The existing project README states that BamSnap-LRS is MIT-licensed. **Repository maintainers should add a `LICENSE` file** containing the applicable license text if it is not already present, so that the distribution terms are explicit.
-
-## Acknowledgments
-
-- Inspired by [JBrowse](https://jbrowse.org/)
-- Inspired by the original [BamSnap](https://github.com/parklab/bamsnap)
-- Uses [pysam](https://github.com/pysam-developers/pysam) for BAM/CRAM access
+Inspired by [JBrowse](https://jbrowse.org/) and the original [Bamsnap](https://github.com/parklab/bamsnap). BAM/CRAM handling uses [pysam](https://github.com/pysam-developers/pysam); PNG/PDF conversion uses [CairoSVG](https://cairosvg.org/).
