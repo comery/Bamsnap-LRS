@@ -1,5 +1,5 @@
 # BamSnap-LRS
-
+[![DOI](https://zenodo.org/badge/735032212.svg)](https://doi.org/10.5281/zenodo.23277809)
 **A static genome browser for long-read sequencing data**
 
 BamSnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignments. It supports DNA and RNA long reads, structural-variant (SV) regions, and VCF-guided SNV highlighting. Figures are rendered as SVG and can also be exported as PNG or PDF, without requiring a web browser or server.
