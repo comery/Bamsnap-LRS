@@ -26,7 +26,7 @@ python bin/bamsnap-lrs dna \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - SVG" \
-    --width 1500
+    --width 1500 --overview-detail show
 
 if [ $? -eq 0 ]; then
     echo "✓ SVG output success: example/chrM_1000_3000.bamsnapLRS.svg"
@@ -46,7 +46,7 @@ python bin/bamsnap-lrs dna \
     --show-coverage \
     --track-title "Test Reads - PDF" \
     --width 1500 \
-	--detail high
+	--detail high --overview-detail show
 
 if [ $? -eq 0 ]; then
     echo "✓ PDF output success: example/chrM_1000_3000.bamsnapLRS.pdf"
@@ -68,7 +68,7 @@ python bin/bamsnap-lrs dna \
     --show-coverage \
     --track-title "Test Reads - PDF" \
     --width 1500 \
-	--detail high
+	--detail high --overview-detail show
 
 if [ $? -eq 0 ]; then
     echo "✓ PDF output success: example/batch_*"
@@ -88,7 +88,7 @@ python bin/bamsnap-lrs dna \
     --show-axis \
     --show-coverage \
     --track-title "Test Reads - PDF" \
-    --width 1500
+    --width 1500 --overview-detail show
 
 if [ $? -eq 0 ]; then
     echo "✓ PDF output success: example/chrM_1000_3000.double.bamsnapLRS.pdf"
@@ -105,7 +105,7 @@ python bin/bamsnap-lrs rna \
 	--out example/rna/test.rna.svg \
 	--fa example/rna/ref.fasta \
 	--show-axis \
-	--width 4000
+	--width 4000 --overview-detail show
 
 if [ $? -eq 0 ]; then
     echo "✓ SVG output success: example/rna/testbam.look/output.svg"
@@ -123,7 +123,7 @@ python bin/bamsnap-lrs dna \
     --show-coverage \
     --track-title "Test Reads - PDF" \
     --width 1500 \
-    -g example/test.gff
+    -g example/test.gff --overview-detail show
     
 python bin/bamsnap-lrs dna \
 	--bam "$BAM" \
@@ -134,4 +134,4 @@ python bin/bamsnap-lrs dna \
     --show-coverage \
     --track-title "Test Reads - SVG" \
     --width 1500 \
-    -g example/test.gff
+    -g example/test.gff --overview-detail show
