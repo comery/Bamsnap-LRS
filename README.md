@@ -15,6 +15,7 @@ BamSnap-LRS is a command-line tool for generating snapshots of BAM/CRAM alignmen
 - [Quick Start](#-quick-start)
 - [Command Reference](#-command-reference)
 - [Visual Elements](#-visual-elements)
+- [Limitation](#-Limitation)
 - [Advanced Usage](#-advanced-usage)
 - [License](#-license)
 - [Acknowledgments](#-acknowledgments)
@@ -227,6 +228,10 @@ GFF/GTF gene models show exons, CDS, and strand; `--gff-display transcript` sepa
 
 ### BED Annotation Track
 `--bed` draws BED features, including block structures from BED12 where present.
+
+## Limitation
+- the current SV visualization is intended for intra-chromosomal events such as INS, DEL, DUP, and INV. Dedicated translocation / breakend cross-chromosome visualization is not currently supported.
+- BamSnap-LRS did not consider duplicate names caused by BAM merging nor use SA tags. 
 
 ## 🔧 Advanced Usage
 
